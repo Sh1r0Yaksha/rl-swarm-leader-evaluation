@@ -8,7 +8,7 @@ from UAV import UAV
 
 class RLSwarm(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    GRID_SIZE = 200
+    GRID_SIZE = 500
     def __init__(self,num_agents:int=5, render_mode=None):
         super(RLSwarm, self).__init__()
 
