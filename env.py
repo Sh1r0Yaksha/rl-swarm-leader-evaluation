@@ -6,7 +6,7 @@ from UAV import UAV
 
 class RLSwarm(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    GRID_SIZE = 200
+    GRID_SIZE = 500
     TARGET = np.array([100, 100], dtype=np.float32)
     def __init__(self, render_mode=None):
         super(RLSwarm, self).__init__()
