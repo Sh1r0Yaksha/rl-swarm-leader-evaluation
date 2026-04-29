@@ -17,6 +17,6 @@ model = DQN(
 
 # 3. Train the Agent
 print("Training started...")
-model.learn(total_timesteps=1000000)
+model.learn(total_timesteps=500000)
 model.save("dqn_gym_model")
 print("Training complete!")

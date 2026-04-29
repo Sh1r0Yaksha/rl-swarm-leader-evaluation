@@ -51,6 +51,7 @@ class RLSwarm(gym.Env):
         # Reset agent position to center
         
         self.uav.position = self.np_random.uniform(low=20, high=self.GRID_SIZE-20, size=(2,)).astype(np.float32)
+        self.TARGET = self.np_random.uniform(low=0, high=self.GRID_SIZE, size=(2,)).astype(np.float32)
         self.uav.orientation = self.np_random.uniform(low=-np.pi, high=np.pi)
         self.current_step = 0
 
@@ -62,9 +63,9 @@ class RLSwarm(gym.Env):
     
     def step(self, action):
         step_size = 5.0
-        if action == 0: self.uav.angular_speed = 3.0  # Left
-        elif action == 1: self.uav.angular_speed = -3.0 # Right
-        else: self.uav.angular_speed = 0.0             # Straight
+        if action == 0: self.uav.angular_direction = 1  # Left
+        elif action == 1: self.uav.angular_direction = -1 # Right
+        else: self.uav.angular_direction = 0             # Straight
 
         # 4. Define Reward Logic
         self.uav.step(self.dt)
@@ -86,7 +87,7 @@ class RLSwarm(gym.Env):
             terminated = True
             reward = -100.0
 
-        if dist_from_target < 50:
+        if dist_from_target < 25:
             terminated = True 
             reward = 1000.0
 
@@ -125,20 +126,52 @@ class RLSwarm(gym.Env):
         canvas = pygame.Surface((self.window_size, self.window_size))
         canvas.fill((255, 255, 255)) # White background
 
-        # Draw the Agent (a blue circle)
-        pygame.draw.circle(
-            canvas,
-            (0, 0, 255),
-            self.uav.position.astype(int),
-            20,
-        )
+        # --- DRAW THE AGENT (AS AN ARROW) ---
+        color = (0, 0, 255) # Blue
+        uav_pos = self.uav.position.astype(int)
+        
+        # 1. Define Arrow Properties
+        arrow_length = 10  # Length of the main shaft
+        head_length = 5   # Length of the arrowhead "wings"
+        head_angle = 0.3   # Angle of the wings relative to the shaft (radians)
+
+        # 2. Calculate the Arrow Shaft (Tail to Head)
+        # 0 rad = East, Pi/2 rad = North/South (depending on convention)
+        center_x, center_y = float(self.uav.position[0]), float(self.uav.position[1])
+        
+        # Vector pointing forward from center
+        fwd_x = float(arrow_length * np.cos(self.uav.orientation))
+        fwd_y = float(arrow_length * np.sin(self.uav.orientation))
+        
+        start_point = (center_x, center_y)
+        end_point = (center_x + fwd_x, center_y + fwd_y)
+
+        # Draw the main shaft
+        pygame.draw.line(canvas, color, start_point, end_point, 3)
+
+        # 3. Calculate and Draw the Arrowhead (The "Wings")
+        
+        # Upper wing angle
+        alpha = float(self.uav.orientation + np.pi - head_angle)
+        wing1_x = float(end_point[0] + head_length * np.cos(alpha))
+        wing1_y = float(end_point[1] + head_length * np.sin(alpha))
+        
+        # Lower wing angle
+        beta = float(self.uav.orientation + np.pi + head_angle)
+        wing2_x = float(end_point[0] + head_length * np.cos(beta))
+        wing2_y = float(end_point[1] + head_length * np.sin(beta))
+
+        # Draw the arrowhead wings
+        pygame.draw.line(canvas, color, end_point, (wing1_x, wing1_y), 3)
+        pygame.draw.line(canvas, color, end_point, (wing2_x, wing2_y), 3)
+        # ------------------------------------
 
         # Draw the target (red dot)
         pygame.draw.circle(
             canvas,
             (255, 0, 0),
             self.TARGET.astype(int),
-            5,
+            25,
         )
 
         if self.render_mode == "human":
