@@ -2,71 +2,113 @@ import gymnasium as gym
 from gymnasium import spaces
 import pygame
 import numpy as np
+from UAV import UAV
 
 class RLSwarm(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    GRID_SIZE = 500
+    GRID_SIZE = 200
     TARGET = np.array([100, 100], dtype=np.float32)
     def __init__(self, render_mode=None):
         super(RLSwarm, self).__init__()
 
-        self.action_space = spaces.Discrete(4)
+        # UAV setup
+        self.uav = UAV()
+        self.action_space = spaces.Discrete(3)
+        self.dt = np.float32(1.0 / self.metadata["render_fps"])
 
-        # 2. Define Observation Space
-        self.observation_space = spaces.Box(low=0, high=1.0, shape=(2,), dtype=np.float32)
+        # Steps setup
+        self.max_steps = 1000
+        self.current_step = 0
+
+        # Observation Space Setup
+        # Obs: [rel_x, rel_y, sin(hdg), cos(hdg)]
+        self.observation_space = spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32)
 
         # Pygame Setup
         self.window_size = self.GRID_SIZE
         self.render_mode = render_mode
         self.window = None
         self.clock = None
-
+    
+    def _get_obs(self):
+        # Calculate relative position and normalize by GRID_SIZE
+        relative_pos = (self.TARGET - self.uav.position) / self.GRID_SIZE
+        
+        # Get heading components
+        heading_sin = np.sin(self.uav.orientation)
+        heading_cos = np.cos(self.uav.orientation)
+        
+        return np.array([
+            relative_pos[0], 
+            relative_pos[1], 
+            heading_sin, 
+            heading_cos
+        ], dtype=np.float32)
+    
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
         # Reset agent position to center
         
-        self.state = self.np_random.uniform(low=0, high=self.GRID_SIZE, size=(2,)).astype(np.float32)
-        
+        self.uav.position = self.np_random.uniform(low=20, high=self.GRID_SIZE-20, size=(2,)).astype(np.float32)
+        self.uav.orientation = self.np_random.uniform(low=-np.pi, high=np.pi)
+        self.current_step = 0
+
         info = {}
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.state / self.GRID_SIZE, info
+        return self._get_obs(), info
     
     def step(self, action):
-        # 3. Apply Logic
-        # 0: Left, 1: Right, 2: Up, 3: Down
         step_size = 5.0
-        if action == 0: self.state[0] -= step_size
-        if action == 1: self.state[0] += step_size
-        if action == 2: self.state[1] -= step_size
-        if action == 3: self.state[1] += step_size
+        if action == 0: self.uav.angular_speed = 3.0  # Left
+        elif action == 1: self.uav.angular_speed = -3.0 # Right
+        else: self.uav.angular_speed = 0.0             # Straight
 
         # 4. Define Reward Logic
-        
-        dist_from_target = np.linalg.norm(self.state - self.TARGET)
+        self.uav.step(self.dt)
 
-        reward = (1 / (1 + dist_from_target)) - 0.1
+        observation = self._get_obs()
+        
+        dist_from_target = np.linalg.norm(self.uav.position - self.TARGET)
+
+        # Progressive reward: getting closer is good
+        reward = -dist_from_target / self.GRID_SIZE
+
+        # Survival Penalty
+        reward -= 0.1
         # print(f'distance from target: {dist_from_target} reward: {reward}')
         
-        # 5. Define Termination Logic
+        # Termination Logic
         terminated = False
-        if np.any(self.state < 0) or np.any(self.state > 500):
+        if np.any(self.uav.position < 0) or np.any(self.uav.position > self.GRID_SIZE):
             terminated = True
-            reward = -25.0
+            reward = -100.0
 
-        if dist_from_target < 5:
+        if dist_from_target < 50:
             terminated = True 
             reward = 1000.0
 
         truncated = False
+        self.current_step += 1
+        if self.current_step >= self.max_steps:
+            truncated = True
+        
         info = {}
 
         if self.render_mode == "human":
             self._render_frame()
 
-        return self.state / self.GRID_SIZE, reward, terminated, truncated, info
+        # if terminated:
+        #     if dist_from_target < 15:
+        #         print("DEBUG: Episode ended - SUCCESS")
+        #     else:
+        #         print(f"DEBUG: Episode ended - CRASH at {self.uav.position}")
+        # if truncated:
+        #     print("DEBUG: Episode ended - TIMEOUT")
+
+        return observation, reward, terminated, truncated, info
     
     def render(self):
         if self.render_mode == "rgb_array":
@@ -87,7 +129,7 @@ class RLSwarm(gym.Env):
         pygame.draw.circle(
             canvas,
             (0, 0, 255),
-            self.state.astype(int),
+            self.uav.position.astype(int),
             20,
         )
 

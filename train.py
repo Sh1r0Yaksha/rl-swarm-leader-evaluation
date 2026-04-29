@@ -6,17 +6,17 @@ env = RLSwarm(render_mode=None)
 model = DQN(
     "MlpPolicy", 
     env, 
-    verbose=1, 
-    learning_rate=1e-3,
-    buffer_size=50000,
-    learning_starts=1000,
-    target_update_interval=1000,
-    gamma=0.99,
-    exploration_fraction=0.2
+    learning_rate=5e-4,      
+    buffer_size=100000, 
+    batch_size=64,           
+    gamma=0.99, 
+    exploration_final_eps=0.05, 
+    exploration_fraction=0.3,
+    verbose=1
 )
 
 # 3. Train the Agent
 print("Training started...")
-model.learn(total_timesteps=100000)
+model.learn(total_timesteps=1000000)
 model.save("dqn_gym_model")
 print("Training complete!")
