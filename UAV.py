@@ -3,8 +3,8 @@ import numpy as np
 class UAV:
     def __init__(
         self,
-        speed: np.float32 = 50.0,
-        angular_speed: np.float32 = 3.0,
+        speed: np.float32 = np.float32(50.0),
+        angular_speed: np.float32 = np.float32(3.0),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
         orientation: np.float32 = np.float32(0.0)

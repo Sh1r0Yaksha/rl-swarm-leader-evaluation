@@ -1,22 +1,46 @@
-from env import RLSwarm
+import os
+import torch
+import supersuit as ss
 from stable_baselines3 import DQN
+from env import RLSwarm
 
-env = RLSwarm(render_mode=None)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"Using device: {device}")
 
-model = DQN(
-    "MlpPolicy", 
-    env, 
-    learning_rate=5e-4,      
-    buffer_size=100000, 
-    batch_size=64,           
-    gamma=0.99, 
-    exploration_final_eps=0.05, 
-    exploration_fraction=0.3,
-    verbose=1
-)
+def train():
+    num_envs = 6
+    num_uavs_per_env = 5
 
-# 3. Train the Agent
-print("Training started...")
-model.learn(total_timesteps=500000)
-model.save("dqn_gym_model")
-print("Training complete!")
+    # Build instance first, then pass to concat_vec_envs_v1
+    env = RLSwarm(num_agents=num_uavs_per_env, render_mode=None)
+    env = ss.black_death_v3(env)
+    env = ss.pettingzoo_env_to_vec_env_v1(env)
+    env = ss.concat_vec_envs_v1(
+        env,                          # ← instance, not callable
+        num_envs,
+        num_cpus=4,
+        base_class="stable_baselines3",
+    )
+
+    model = DQN(
+        "MlpPolicy",
+        env,
+        learning_rate=5e-4,
+        buffer_size=100000,
+        batch_size=256,
+        gamma=0.99,
+        exploration_final_eps=0.05,
+        exploration_fraction=0.3,
+        target_update_interval=1000,
+        verbose=1,
+        device=device
+    )
+
+    print(f"Training started on {device} with {num_envs} envs x {num_uavs_per_env} UAVs...")
+    model.learn(total_timesteps=10000000, progress_bar=True)
+    model.save("shared_swarm_model")
+    env.close()
+    print("Training complete!")
+
+if __name__ == "__main__":
+    train()
