@@ -1,4 +1,5 @@
 import numpy as np
+from numpy._core.multiarray import array
 
 class UAV:
     def __init__(
@@ -7,7 +8,7 @@ class UAV:
         angular_speed: np.float32 = np.float32(3.0),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
-        orientation: np.float32 = np.float32(0.0)
+        orientation: np.float32 = np.float32(0.0),
     ):
         """
         Initializes a 2D UAV object.
@@ -46,3 +47,15 @@ class UAV:
 
     def __repr__(self):
         return f"UAV(pos={self.position}, speed={self.speed}, hdg={self.orientation})"
+
+class Follower(UAV):
+    def __init__(self,
+        speed: np.float32 = np.float32(50),
+        angular_speed: np.float32 = np.float32(3),
+        angular_direction: int = 0,
+        position: np.ndarray = np.array([0, 0], dtype=np.float32),
+        orientation: np.float32 = np.float32(0)
+    ):
+        super().__init__(speed, angular_speed, angular_direction, position, orientation)
+        self.neighbours : list[UAV] = []
+        self.prev_dc : np.float32 = np.float32(0.0)

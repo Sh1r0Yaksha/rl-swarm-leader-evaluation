@@ -8,7 +8,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 def train():
-    num_envs = 6
+    num_envs = 1000
     num_uavs_per_env = 5
 
     # Build instance first, then pass to concat_vec_envs_v1
@@ -18,7 +18,7 @@ def train():
     env = ss.concat_vec_envs_v1(
         env,                          # ← instance, not callable
         num_envs,
-        num_cpus=4,
+        num_cpus=12,
         base_class="stable_baselines3",
     )
 
@@ -36,11 +36,16 @@ def train():
         device=device
     )
 
-    print(f"Training started on {device} with {num_envs} envs x {num_uavs_per_env} UAVs...")
-    model.learn(total_timesteps=10000000, progress_bar=True)
-    model.save("shared_swarm_model")
-    env.close()
-    print("Training complete!")
+    try:
+        model.learn(total_timesteps=10000000, progress_bar=True)
+        print("\nTraining reached target timesteps.")
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user. Saving current progress...")
+    finally:
+        # This block runs regardless of whether training finished or was interrupted
+        model.save("shared_swarm_model")
+        env.close()
+        print("Model saved as 'shared_swarm_model' and environment closed.")
 
 if __name__ == "__main__":
     train()
