@@ -4,11 +4,11 @@ from pettingzoo import ParallelEnv
 from gymnasium import spaces
 import pygame
 import numpy as np
-from UAV import UAV
+from UAV import UAV, Follower, Leader
 
 class RLSwarm(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    GRID_SIZE = 500
+    GRID_SIZE = 600
     d1 = 20
     d2 = 40
     d3 = 80
@@ -16,43 +16,38 @@ class RLSwarm(ParallelEnv):
     w_CoA = -20
     w_CoM = 1
     w_Coh = 2
-    n_UAVs = 5
-    def __init__(self,num_agents:int=5, render_mode=None):
+    w_Ali1 = 10
+    w_Ali2 = -10
+    def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None):
         super(RLSwarm, self).__init__()
 
-        # self.TARGET = np.array([100, 100], dtype=np.float32)
-
         self.n_agents = num_agents
-        self.possible_agents = [f"uav_{i}" for i in range(num_agents)]
+        self.possible_agents: list[str] = [f"uav_{i}" for i in range(num_agents)]
         self.agents = self.possible_agents[:]
+        self.leader = leader_uav
+        self.init_leader_pos = leader_uav.position.copy()
+        self.init_leader_orient = leader_uav.orientation
 
         # UAV setup
         self.dt = np.float32(1.0 / self.metadata["render_fps"])
 
         # Steps setup
-        self.max_steps = 1000
+        self.max_steps = 3500
         self.current_step = 0
 
-        # Observation Space Setup
-        # Obs: [rel_pos_with_neighbours, relo_orient_with_neighbours]
-        # self.observation_spaces = {
-        #     agent: spaces.Box(low=-1, high=1, shape=(5,), dtype=np.float32)
-        #     for agent in self.possible_agents
-        # }
-
-        # Shape: 2 (Self orientation) + (n-1)*4 (Relative neighbor data)
-        self.obs_shape = 2 + (self.n_agents - 1) * 4
+        # Shape: 4 (Self pos and orientation) + (n-1 + leader) * 4 (Relative neighbor data)
+        self.obs_shape = 4 + (self.n_agents - 1 + 1) * 4
 
         self.observation_spaces = {
             agent: spaces.Box(low=-1.0, high=1.0, shape=(self.obs_shape,), dtype=np.float32)
-            for agent in self.possible_agents
+            for agent in self.agents
         }
         
         self.action_spaces = {
-            agent: spaces.Discrete(3) for agent in self.possible_agents
+            agent: spaces.Discrete(3) for agent in self.agents
         }
 
-        self.uavs = {agent: UAV() for agent in self.possible_agents}
+        self.followers: dict[str, Follower] = {agent: Follower() for agent in self.agents}
 
         # Pygame Setup
         self.window_size = self.GRID_SIZE
@@ -67,50 +62,55 @@ class RLSwarm(ParallelEnv):
     def action_space(self, agent): return self.action_spaces[agent]
 
     def _get_obs(self, agent_id):
-        uav = self.uavs[agent_id]
-        # Calculate relative position and normalize by GRID_SIZE
-        # rel_pos = (self.TARGET - uav.position) / self.GRID_SIZE
+        uav = self.followers[agent_id]
 
-        # 1. Start with self orientation
-        obs = [np.sin(uav.orientation), np.cos(uav.orientation)]
-
-        # 2. Add all OTHER agents relative to this one
-        for other_id in self.possible_agents:
-            if other_id == agent_id:
-                continue
-
-            other_uav = self.uavs[other_id]
-
-            # Position of 'other' relative to 'self'
-            # Normalized by a "Sensing Range" or GRID_SIZE
-            rel_pos = (other_uav.position - uav.position) / self.GRID_SIZE
-
-            # Heading of 'other' relative to 'self'
-            diff_angle = other_uav.orientation - uav.orientation
-            rel_hdg_sin = np.sin(diff_angle)
-            rel_hdg_cos = np.cos(diff_angle)
-
-            obs.extend([rel_pos[0], rel_pos[1], rel_hdg_sin, rel_hdg_cos])
+        # 1. Start with self pos and orientation
         
+        obs = [uav.position[0] / self.GRID_SIZE,
+               uav.position[1] / self.GRID_SIZE,
+               np.sin(uav.orientation),
+               np.cos(uav.orientation)]
+
+        # 2. Add OTHER Learning agents relative to this one
+        for other_id, other_uav in self.followers.items():
+            if other_id != agent_id:
+                obs.extend(self._rel_obs(uav, other_uav))
+
+        obs.extend(self._rel_obs(uav, self.leader))
+
         return np.array(obs, dtype=np.float32)
     
+    def _rel_obs(self, main_uav, target_uav):
+        """Helper to calculate relative position and heading"""
+        rel_pos = (target_uav.position - main_uav.position) / self.GRID_SIZE
+        diff_angle = target_uav.orientation - main_uav.orientation
+        return [rel_pos[0], rel_pos[1], np.sin(diff_angle), np.cos(diff_angle)]
+    
+    def set_init_leader_state(self,
+                              pos: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
+                              orient: np.float32 = np.float32(0.0)):
+        """Method to update the starting position from outside"""
+        self.init_leader_pos = pos
+        self.init_leader_orient = orient
+
     def reset(self, seed=None, options=None):
-        self.agents = self.possible_agents[:]
         observations = {}
         self.current_step = 0
 
-        initial_positions = []
-        for agent in self.agents:
-            pos = np.random.uniform(100, 400, size=(2,)).astype(np.float32)
-            self.uavs[agent].position = pos
-            self.uavs[agent].orientation = np.random.uniform(-np.pi, np.pi)
+        self.leader.reset(self.init_leader_pos, self.init_leader_orient)
+
+        initial_positions = [self.leader.position]
+        for id, uav in self.followers.items():
+            pos = np.random.uniform(100, self.GRID_SIZE - 100, size=(2,)).astype(np.float32)
+            orient = np.float32(np.random.uniform(-np.pi, np.pi))
+            uav.reset(pos, orient)
             initial_positions.append(pos)
 
         init_centroid = np.mean(initial_positions, axis=0)
 
-        for agent in self.agents:
-            uav = self.uavs[agent]
+        for agent, uav in self.followers.items():
             uav.prev_dc = np.linalg.norm(uav.position - init_centroid)
+            uav.prev_dl = np.linalg.norm(uav.position - self.leader.position)
             observations[agent] = self._get_obs(agent)
         
         info = {}
@@ -122,9 +122,11 @@ class RLSwarm(ParallelEnv):
     def step(self, actions):
         self.current_step += 1
         
+        self.leader.step(self.dt)
+
         # 1. Update UAV Physics
         for agent_id, action in actions.items():
-            uav = self.uavs[agent_id]
+            uav = self.followers[agent_id]
             # Action space mapped to angular changes
             if action == 0: uav.angular_direction = 1
             elif action == 1: uav.angular_direction = -1
@@ -132,40 +134,58 @@ class RLSwarm(ParallelEnv):
             uav.step(self.dt)
 
         # 2. Pre-calculate group metrics for rewards
-        all_pos = np.array([u.position for u in self.uavs.values()])
+
+        all_pos = np.array([u.position for u in self.followers.values()] + [self.leader.position])
         centroid = np.mean(all_pos, axis=0) #
         
         observations, rewards, terminations, truncations, infos = {}, {}, {}, {}, {}
 
-        for agent_id, uav in self.uavs.items():
+        for agent_id, uav in self.followers.items():
             # Initial reward components
             r_CoA = 0  # Collision Avoidance
             r_Coh = 0  # Cohesion
             r_CoM = 0  # Connectivity Maintenance
             r_Ali = 0  # Alignment (Leader-Following)
 
+
+            current_dc = np.linalg.norm(uav.position - centroid)
+            current_dl = np.linalg.norm(uav.position - self.leader.position)
+
             # a) Collision Avoidance: Penalty if distance < d1
-            for other_id, other_uav in self.uavs.items():
+            for other_id, other_uav in self.followers.items():
                 if agent_id != other_id:
                     dist = np.linalg.norm(uav.position - other_uav.position)
                     if dist < self.d1:
                         r_CoA += self.w_CoA
 
+            if current_dl < self.d1:
+                r_CoA += self.w_CoA
+
             # b) Cohesion: Reward for moving closer to the centroid
             # Note: Requires tracking previous distance to centroid
-            curr_dc = np.linalg.norm(uav.position - centroid)
-            prev_dc = getattr(uav, 'prev_dc', curr_dc)
-            if curr_dc < prev_dc:
-                r_Coh = self.w_Coh
-            uav.prev_dc = curr_dc
 
-            # c) Connectivity Maintenance: Reward for staying in 'Flight Zone'
+            prev_dc = uav.prev_dc
+            if current_dc < prev_dc:
+                r_Coh = self.w_Coh
+            uav.prev_dc = current_dc
+
+            # c) Alignment with Leader: Reward for moving closer to the Leader
+            prev_dl = uav.prev_dl
+            if current_dl < prev_dl:
+                r_Ali = self.w_Ali1
+            elif current_dl > prev_dl:
+                r_Ali = self.w_Ali2
+
+            # d) Connectivity Maintenance: Reward for staying in 'Flight Zone'
             # Flight zone is defined between d1 and d3
-            for other_id, other_uav in self.uavs.items():
+            for other_id, other_uav in self.followers.items():
                 if agent_id != other_id:
                     dist = np.linalg.norm(uav.position - other_uav.position)
                     if self.d1 <= dist <= self.d3:
                         r_CoM += self.w_CoM
+
+            if self.d1 <= current_dl <= self.d3:
+                r_CoM += self.w_CoM
 
             # Final reward summation
             rewards[agent_id] = r_CoA + r_Coh + r_CoM + r_Ali
@@ -176,6 +196,16 @@ class RLSwarm(ParallelEnv):
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
             infos[agent_id] = {}
+        
+        leader_out_of_bounds = np.any(self.leader.position < 0) or np.any(self.leader.position > self.GRID_SIZE)
+        if any(terminations.values()):
+            for agent_id in self.followers:
+                terminations[agent_id] = True
+                rewards[agent_id] -= 100
+
+        if leader_out_of_bounds:
+            for agent_id in self.followers:
+                terminations[agent_id] = True
 
         if self.render_mode == "human":
             self._render_frame()
@@ -201,36 +231,23 @@ class RLSwarm(ParallelEnv):
         # pygame.draw.circle(canvas, (255, 0, 0), self.TARGET.astype(int), 25)
 
         # 2. Iterate through all UAVs and draw them as arrows
-        color = (0, 0, 255) # Blue
+        
         arrow_length = 15
         head_length = 7
         head_angle = 0.4
+        color = (0, 0, 255) # Blue
 
-        for agent_id, uav in self.uavs.items():
-            # Get position and orientation for this specific UAV
-            cx, cy = float(uav.position[0]), float(uav.position[1])
-            angle = float(uav.orientation)
-
-            # Calculate shaft
-            fwd_x = float(arrow_length * np.cos(angle))
-            fwd_y = float(arrow_length * np.sin(angle))
-            start_point = (cx, cy)
-            end_point = (cx + fwd_x, cy + fwd_y)
-
-            # Draw shaft
+        for agent_id, uav in self.followers.items():
+            start_point, end_point, w1, w2 = self.make_arrow(uav, arrow_length, head_length, head_angle)
             pygame.draw.line(canvas, color, start_point, end_point, 3)
-
-            # Calculate and draw wings
-            alpha = angle + np.pi - head_angle
-            beta = angle + np.pi + head_angle
-            
-            w1 = (float(end_point[0] + head_length * np.cos(alpha)), 
-                  float(end_point[1] + head_length * np.sin(alpha)))
-            w2 = (float(end_point[0] + head_length * np.cos(beta)), 
-                  float(end_point[1] + head_length * np.sin(beta)))
-
             pygame.draw.line(canvas, color, end_point, w1, 3)
             pygame.draw.line(canvas, color, end_point, w2, 3)
+        
+        color = (255, 0, 0)
+        start_point, end_point, w1, w2 = self.make_arrow(self.leader, arrow_length, head_length, head_angle)
+        pygame.draw.line(canvas, color, start_point, end_point, 3)
+        pygame.draw.line(canvas, color, end_point, w1, 3)
+        pygame.draw.line(canvas, color, end_point, w2, 3)
 
         if self.render_mode == "human" :
             if self.clock is not None and self.window is not None:
@@ -240,7 +257,34 @@ class RLSwarm(ParallelEnv):
                 self.clock.tick(self.metadata["render_fps"])
         else:
             return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
+    
+    def make_arrow(self, uav, arrow_length, head_length, head_angle):
+        # Get position and orientation for this specific UAV
+        cx, cy = float(uav.position[0]), float(uav.position[1])
+        angle = float(uav.orientation)
+
+        # Calculate shaft
+        fwd_x = float(arrow_length * np.cos(angle))
+        fwd_y = float(arrow_length * np.sin(angle))
+        start_point = (cx, cy)
+        end_point = (cx + fwd_x, cy + fwd_y)
+
+        # Draw shaft
         
+
+        # Calculate and draw wings
+        alpha = angle + np.pi - head_angle
+        beta = angle + np.pi + head_angle
+        
+        w1 = (float(end_point[0] + head_length * np.cos(alpha)), 
+                float(end_point[1] + head_length * np.sin(alpha)))
+        w2 = (float(end_point[0] + head_length * np.cos(beta)), 
+                float(end_point[1] + head_length * np.sin(beta)))
+        
+        return start_point, end_point, w1, w2
+        
+
+
     def close(self):
         if self.window is not None:
             pygame.display.quit()

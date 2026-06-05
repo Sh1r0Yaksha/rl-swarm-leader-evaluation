@@ -2,17 +2,19 @@ import supersuit as ss
 from env import RLSwarm
 from stable_baselines3 import DQN
 import numpy as np
+from UAV import Leader
 
 def test():
-    num_uavs = 5
-
-    env = RLSwarm(num_agents=num_uavs, render_mode="human")
-    env = ss.black_death_v3(env)
+    num_uavs = 16
+    leader = Leader(position=np.array([300, 300]),
+                    orientation=np.float32(0))
+    env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human")
+    # env = ss.black_death_v3(env)
     env = ss.pettingzoo_env_to_vec_env_v1(env)
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")
 
     try:
-        model = DQN.load("shared_swarm_model", env=env)
+        model = DQN.load("swarm_model", env=env)
         print("Model loaded successfully!")
     except FileNotFoundError:
         print("Model file not found. Check the filename.")

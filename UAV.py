@@ -5,7 +5,7 @@ class UAV:
     def __init__(
         self,
         speed: np.float32 = np.float32(50.0),
-        angular_speed: np.float32 = np.float32(3.0),
+        angular_speed: np.float32 = np.float32(3),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
         orientation: np.float32 = np.float32(0.0),
@@ -45,17 +45,29 @@ class UAV:
 
         self.orientation += self.angular_direction * self.angular_speed * dt
 
+    def reset(self,
+              position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
+              orientation: np.float32 = np.float32(0.0)):
+        self.position = np.array(position, dtype=np.float32)
+        self.orientation = orientation
+        self.angular_direction = 0
+
     def __repr__(self):
         return f"UAV(pos={self.position}, speed={self.speed}, hdg={self.orientation})"
 
 class Follower(UAV):
-    def __init__(self,
-        speed: np.float32 = np.float32(50),
-        angular_speed: np.float32 = np.float32(3),
-        angular_direction: int = 0,
-        position: np.ndarray = np.array([0, 0], dtype=np.float32),
-        orientation: np.float32 = np.float32(0)
-    ):
-        super().__init__(speed, angular_speed, angular_direction, position, orientation)
-        self.neighbours : list[UAV] = []
-        self.prev_dc : np.float32 = np.float32(0.0)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prev_dc: np.float32 = np.float32(0.0)
+        self.prev_dl: np.float32 = np.float32(0.0)
+
+class Leader(UAV):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def step(self, dt):
+        rng = np.random.random()
+        if rng < 0.25: self.angular_direction = -1
+        elif rng > 0.85: self.angular_direction = 1
+        else: self.angular_direction = 0
+        return super().step(dt)
