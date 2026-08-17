@@ -1,11 +1,15 @@
+import os
+from dotenv import load_dotenv
 import supersuit as ss
 from env import RLSwarm
 from stable_baselines3 import DQN
 import numpy as np
 from UAV import Leader
 
+load_dotenv()
+
 def test():
-    num_uavs = 16
+    num_uavs = int(os.getenv("NUM_AGENTS", "16"))
     leader = Leader(position=np.array([300, 300]),
                     orientation=np.float32(0))
     env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human")

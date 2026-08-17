@@ -1,11 +1,10 @@
 import numpy as np
-from numpy._core.multiarray import array
 
 class UAV:
     def __init__(
         self,
-        speed: np.float32 = np.float32(50.0),
-        angular_speed: np.float32 = np.float32(3),
+        speed: np.float32 = np.float32(240.0),  # 240 units/sec (4 units/frame at 60 FPS)
+        angular_speed: np.float32 = np.float32(np.radians(200)),  # ~3.49 rad/s
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
         orientation: np.float32 = np.float32(0.0),
@@ -36,24 +35,22 @@ class UAV:
         # Normalizes any angle to the range [-pi, pi]
         self._orientation = np.float32(((value + np.pi) % (2 * np.pi)) - np.pi)
 
-    def step(self, dt):
+    def step(self, dt: float):
         vx = self.speed * np.cos(self.orientation)
         vy = self.speed * np.sin(self.orientation)
         velocity = np.array([vx, vy], dtype=np.float32)
 
         self.position += velocity * dt
-
         self.orientation += self.angular_direction * self.angular_speed * dt
 
-    def reset(self,
-              position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
-              orientation: np.float32 = np.float32(0.0)):
+    def reset(
+        self,
+        position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
+        orientation: np.float32 = np.float32(0.0)
+    ):
         self.position = np.array(position, dtype=np.float32)
         self.orientation = orientation
         self.angular_direction = 0
-
-    def __repr__(self):
-        return f"UAV(pos={self.position}, speed={self.speed}, hdg={self.orientation})"
 
 class Follower(UAV):
     def __init__(self, *args, **kwargs):
@@ -61,13 +58,32 @@ class Follower(UAV):
         self.prev_dc: np.float32 = np.float32(0.0)
         self.prev_dl: np.float32 = np.float32(0.0)
 
+    def reset_tracker(self, initial_dc: float, initial_dl: float):
+        """Call this on environment reset with actual starting distances."""
+        self.prev_dc = np.float32(initial_dc)
+        self.prev_dl = np.float32(initial_dl)
+
 class Leader(UAV):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.turn_timer = 0  # Frame counter for smooth steering
 
-    def step(self, dt):
-        rng = np.random.random()
-        if rng < 0.25: self.angular_direction = -1
-        elif rng > 0.85: self.angular_direction = 1
-        else: self.angular_direction = 0
-        return super().step(dt)
+    def step(self, dt: float, grid_w: float = 800.0, grid_h: float = 600.0):
+        # Steer back toward center if nearing borders
+        margin = 100.0
+        if self.position[0] < margin or self.position[0] > grid_w - margin or \
+           self.position[1] < margin or self.position[1] > grid_h - margin:
+            target_angle = np.arctan2((grid_h/2) - self.position[1], (grid_w/2) - self.position[0])
+            angle_diff = (target_angle - self.orientation + np.pi) % (2 * np.pi) - np.pi
+            self.angular_direction = 1 if angle_diff > 0 else -1
+            self.turn_timer = 30
+        elif self.turn_timer <= 0:
+            rng = np.random.random()
+            if rng < 0.20: self.angular_direction = -1
+            elif rng > 0.80: self.angular_direction = 1
+            else: self.angular_direction = 0
+            self.turn_timer = np.random.randint(60, 120)
+        else:
+            self.turn_timer -= 1
+
+        super().step(dt)
