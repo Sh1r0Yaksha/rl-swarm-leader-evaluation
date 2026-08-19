@@ -15,8 +15,10 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 def make_env():
-    leader = Leader(position=np.array([GRID_SIZE/2, GRID_SIZE/2]),
-                    orientation=np.float32(0))
+    pos = np.random.uniform(100, GRID_SIZE - 100, size=2).astype(np.float32)
+    hdg = np.float32(np.random.uniform(-np.pi, np.pi))
+    leader = Leader(position=pos,
+                    orientation=hdg)
     env = RLSwarm(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
     # env = ss.black_death_v3(env)
     env = ss.pad_observations_v0(env)

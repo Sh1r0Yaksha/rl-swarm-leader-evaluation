@@ -104,8 +104,11 @@ class RLSwarm(ParallelEnv):
     def reset(self, seed=None, options=None):
         observations = {}
         self.current_step = 0
-
-        self.leader.reset(self.init_leader_pos, self.init_leader_orient)
+        leader_x = np.float32(np.random.uniform(self.GRID_SIZE/10, self.GRID_SIZE - self.GRID_SIZE/10))
+        leader_y = np.float32(np.random.uniform(self.GRID_SIZE/10, self.GRID_SIZE - self.GRID_SIZE/10))
+        leader_pos = np.array([leader_x, leader_y])
+        leader_hdg = np.float32(np.random.uniform(-np.pi, np.pi))
+        self.leader.reset(leader_pos, leader_hdg)
 
         initial_positions = [self.leader.position]
         for id, uav in self.followers.items():
