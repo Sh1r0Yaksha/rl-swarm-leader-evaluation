@@ -9,6 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
+# Log files
+tb_logs
 
 # IDE
 .vscode
