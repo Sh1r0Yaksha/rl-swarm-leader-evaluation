@@ -1,10 +1,15 @@
 import numpy as np
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
 
 class UAV:
     def __init__(
         self,
-        speed: np.float32 = np.float32(240.0),  # 240 units/sec (4 units/frame at 60 FPS)
-        angular_speed: np.float32 = np.float32(np.radians(200)),  # ~3.49 rad/s
+        speed: np.float32 = np.float32(1.0),# 1 units/frame
+        angular_speed: np.float32 = np.float32(np.radians(4)),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
         orientation: np.float32 = np.float32(0.0),
@@ -68,22 +73,40 @@ class Leader(UAV):
         super().__init__(*args, **kwargs)
         self.turn_timer = 0  # Frame counter for smooth steering
 
-    def step(self, dt: float, grid_w: float = 800.0, grid_h: float = 600.0):
-        # Steer back toward center if nearing borders
-        margin = 100.0
-        if self.position[0] < margin or self.position[0] > grid_w - margin or \
-           self.position[1] < margin or self.position[1] > grid_h - margin:
-            target_angle = np.arctan2((grid_h/2) - self.position[1], (grid_w/2) - self.position[0])
+    def step(self, dt: float, grid_w: float = GRID_SIZE, grid_h: float = GRID_SIZE):
+        margin = 25.0  # Safe distance from boundary
+        
+        # 1. Wall avoidance check
+        if (self.position[0] < margin or self.position[0] > grid_w - margin or
+            self.position[1] < margin or self.position[1] > grid_h - margin):
+            
+            # Calculate angle pointing toward grid center
+            target_angle = np.arctan2((grid_h / 2.0) - self.position[1], (grid_w / 2.0) - self.position[0])
             angle_diff = (target_angle - self.orientation + np.pi) % (2 * np.pi) - np.pi
-            self.angular_direction = 1 if angle_diff > 0 else -1
-            self.turn_timer = 30
+            
+            # Turn toward center
+            if abs(angle_diff) < 0.1:
+                self.angular_direction = 0
+            elif abs(abs(angle_diff) - np.pi) < 0.1:
+                # BREAK THE DEADLOCK: Force consistent left turn when facing directly away from center
+                self.angular_direction = 1
+            else:
+                self.angular_direction = 1 if angle_diff > 0 else -1
+                
+            self.turn_timer = 0
+
+        # 2. Random wander when safe
         elif self.turn_timer <= 0:
             rng = np.random.random()
-            if rng < 0.20: self.angular_direction = -1
-            elif rng > 0.80: self.angular_direction = 1
-            else: self.angular_direction = 0
-            self.turn_timer = np.random.randint(60, 120)
+            if rng < 0.40:
+                self.angular_direction = -1   # Turn right
+            elif rng > 0.60:
+                self.angular_direction = 1    # Turn left
+            else:
+                self.angular_direction = 0    # Straight
+            self.turn_timer = np.random.randint(15, 35)
         else:
             self.turn_timer -= 1
 
+        # 3. Apply orientation and position physics
         super().step(dt)

@@ -9,11 +9,13 @@ from UAV import Leader
 
 load_dotenv()
 
+GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 def make_env():
-    leader = Leader(position=np.array([300, 300]),
+    leader = Leader(position=np.array([GRID_SIZE/2, GRID_SIZE/2]),
                     orientation=np.float32(0))
     env = RLSwarm(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
     # env = ss.black_death_v3(env)
@@ -36,10 +38,9 @@ def train():
         env,
         learning_rate=1e-4, 
         buffer_size=10_000,
-        learning_starts=1_000,
         batch_size=64,
         gamma=0.75,
-        exploration_final_eps=0.01,
+        exploration_final_eps=0,
         exploration_fraction=0.3,
         target_update_interval=250,
         verbose=1,
@@ -55,7 +56,7 @@ def train():
             log_interval=1
         )
     finally:
-        model.save("swarm_model")
+        model.save(os.getenv("SAVE_NAME", "swarm_model"))
         env.close()
 
 if __name__ == "__main__":

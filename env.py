@@ -5,19 +5,26 @@ from gymnasium import spaces
 import pygame
 import numpy as np
 from UAV import UAV, Follower, Leader
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+RENDER_FPS = int(os.getenv("RENDER_FPS", "150"))
+RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 
 class RLSwarm(ParallelEnv):
-    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 60}
-    GRID_SIZE = 600
-    d1 = 20
-    d2 = 40
-    d3 = 80
+    metadata = {"render_modes": ["human", "rgb_array"]}
+    GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+    d1 = int(os.getenv("D1", "5"))
+    d2 = int(os.getenv("D2", "10"))
+    d3 = int(os.getenv("D3", "20"))
     discount_factor = 0.75
     w_CoA = -20
     w_CoM = 1
     w_Coh = 2
-    w_Ali1 = 10
-    w_Ali2 = -10
+    w_Ali1 = 5
+    w_Ali2 = -1
     def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None):
         super(RLSwarm, self).__init__()
 
@@ -29,10 +36,10 @@ class RLSwarm(ParallelEnv):
         self.init_leader_orient = leader_uav.orientation
 
         # UAV setup
-        self.dt = np.float32(1.0 / self.metadata["render_fps"])
+        self.dt = np.float32(1.0)
 
         # Steps setup
-        self.max_steps = 3500
+        self.max_steps = int(os.getenv("EPISODE_TIMESTEPS", "500"))
         self.current_step = 0
 
         # Shape: 4 (Self pos and orientation) + (n-1 + leader) * 4 (Relative neighbor data)
@@ -71,12 +78,13 @@ class RLSwarm(ParallelEnv):
                np.sin(uav.orientation),
                np.cos(uav.orientation)]
 
-        # 2. Add OTHER Learning agents relative to this one
+        # 2. Add the leaders observation
+        obs.extend(self._rel_obs(uav, self.leader))
+
+        # 3. Add OTHER Learning agents relative to this one
         for other_id, other_uav in self.followers.items():
             if other_id != agent_id:
-                obs.extend(self._rel_obs(uav, other_uav))
-
-        obs.extend(self._rel_obs(uav, self.leader))
+                obs.extend(self._rel_obs(uav, other_uav))        
 
         return np.array(obs, dtype=np.float32)
     
@@ -254,7 +262,7 @@ class RLSwarm(ParallelEnv):
                 self.window.blit(canvas, canvas.get_rect())
                 pygame.event.pump()
                 pygame.display.update()
-                self.clock.tick(self.metadata["render_fps"])
+                self.clock.tick(RENDER_FPS)
         else:
             return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
     

@@ -8,9 +8,11 @@ from UAV import Leader
 
 load_dotenv()
 
+GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+
 def test():
     num_uavs = int(os.getenv("NUM_AGENTS", "16"))
-    leader = Leader(position=np.array([300, 300]),
+    leader = Leader(position=np.array([GRID_SIZE/2, GRID_SIZE/2]),
                     orientation=np.float32(0))
     env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human")
     # env = ss.black_death_v3(env)
@@ -18,7 +20,7 @@ def test():
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")
 
     try:
-        model = DQN.load("swarm_model", env=env)
+        model = DQN.load(os.getenv("SAVE_NAME", "swarm_model"), env=env)
         print("Model loaded successfully!")
     except FileNotFoundError:
         print("Model file not found. Check the filename.")
