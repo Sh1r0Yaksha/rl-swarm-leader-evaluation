@@ -225,39 +225,42 @@ class RLSwarm(ParallelEnv):
             return self._render_frame()
         
     def _render_frame(self):
+        arrow_multiplier = min(2, RENDER_MULTIPLIER)
+        # Scale canvas and window size
+        scaled_size = int(self.window_size * RENDER_MULTIPLIER)
+
         if self.window is None and self.render_mode == "human":
             pygame.init()
             pygame.display.init()
-            self.window = pygame.display.set_mode((self.window_size, self.window_size))
+            self.window = pygame.display.set_mode((scaled_size, scaled_size))
         if self.clock is None and self.render_mode == "human":
             self.clock = pygame.time.Clock()
 
-        canvas = pygame.Surface((self.window_size, self.window_size))
+        canvas = pygame.Surface((scaled_size, scaled_size))
         canvas.fill((255, 255, 255)) # White background
 
-        # # 1. Draw the target (red dot) first so UAVs are on top
-        # pygame.draw.circle(canvas, (255, 0, 0), self.TARGET.astype(int), 25)
-
-        # 2. Iterate through all UAVs and draw them as arrows
-        
-        arrow_length = 15
-        head_length = 7
+        # Scale arrow dimensions and line thickness proportionally
+        arrow_length = 15 * arrow_multiplier
+        head_length = 7 * arrow_multiplier
+        line_width = max(1, int(3 * arrow_multiplier))
         head_angle = 0.4
-        color = (0, 0, 255) # Blue
-
+        
+        # 1. Followers (Blue)
+        color = (0, 0, 255)
         for agent_id, uav in self.followers.items():
             start_point, end_point, w1, w2 = self.make_arrow(uav, arrow_length, head_length, head_angle)
-            pygame.draw.line(canvas, color, start_point, end_point, 3)
-            pygame.draw.line(canvas, color, end_point, w1, 3)
-            pygame.draw.line(canvas, color, end_point, w2, 3)
+            pygame.draw.line(canvas, color, start_point, end_point, line_width)
+            pygame.draw.line(canvas, color, end_point, w1, line_width)
+            pygame.draw.line(canvas, color, end_point, w2, line_width)
         
+        # 2. Leader (Red)
         color = (255, 0, 0)
         start_point, end_point, w1, w2 = self.make_arrow(self.leader, arrow_length, head_length, head_angle)
-        pygame.draw.line(canvas, color, start_point, end_point, 3)
-        pygame.draw.line(canvas, color, end_point, w1, 3)
-        pygame.draw.line(canvas, color, end_point, w2, 3)
+        pygame.draw.line(canvas, color, start_point, end_point, line_width)
+        pygame.draw.line(canvas, color, end_point, w1, line_width)
+        pygame.draw.line(canvas, color, end_point, w2, line_width)
 
-        if self.render_mode == "human" :
+        if self.render_mode == "human":
             if self.clock is not None and self.window is not None:
                 self.window.blit(canvas, canvas.get_rect())
                 pygame.event.pump()
@@ -265,10 +268,12 @@ class RLSwarm(ParallelEnv):
                 self.clock.tick(RENDER_FPS)
         else:
             return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
-    
+
+
     def make_arrow(self, uav, arrow_length, head_length, head_angle):
-        # Get position and orientation for this specific UAV
-        cx, cy = float(uav.position[0]), float(uav.position[1])
+        # Scale UAV coordinates by RENDER_MULTIPLIER
+        cx = float(uav.position[0]) * RENDER_MULTIPLIER
+        cy = float(uav.position[1]) * RENDER_MULTIPLIER
         angle = float(uav.orientation)
 
         # Calculate shaft
@@ -277,17 +282,18 @@ class RLSwarm(ParallelEnv):
         start_point = (cx, cy)
         end_point = (cx + fwd_x, cy + fwd_y)
 
-        # Draw shaft
-        
-
-        # Calculate and draw wings
+        # Calculate wings
         alpha = angle + np.pi - head_angle
         beta = angle + np.pi + head_angle
         
-        w1 = (float(end_point[0] + head_length * np.cos(alpha)), 
-                float(end_point[1] + head_length * np.sin(alpha)))
-        w2 = (float(end_point[0] + head_length * np.cos(beta)), 
-                float(end_point[1] + head_length * np.sin(beta)))
+        w1 = (
+            float(end_point[0] + head_length * np.cos(alpha)), 
+            float(end_point[1] + head_length * np.sin(alpha))
+        )
+        w2 = (
+            float(end_point[0] + head_length * np.cos(beta)), 
+            float(end_point[1] + head_length * np.sin(beta))
+        )
         
         return start_point, end_point, w1, w2
         
