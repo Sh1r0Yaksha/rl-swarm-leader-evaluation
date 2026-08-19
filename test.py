@@ -12,8 +12,10 @@ GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
 
 def test():
     num_uavs = int(os.getenv("NUM_AGENTS", "16"))
-    leader = Leader(position=np.array([GRID_SIZE/2, GRID_SIZE/2]),
-                    orientation=np.float32(0))
+    pos = np.random.uniform(100, GRID_SIZE - 100, size=2).astype(np.float32)
+    hdg = np.float32(np.random.uniform(-np.pi, np.pi))
+    leader = Leader(position=pos,
+                    orientation=hdg)
     env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human")
     # env = ss.black_death_v3(env)
     env = ss.pettingzoo_env_to_vec_env_v1(env)
