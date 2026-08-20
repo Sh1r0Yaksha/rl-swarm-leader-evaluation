@@ -35,7 +35,8 @@ def train():
     
     model = DQN.load(os.getenv("SAVE_NAME", "swarm_model"), env=env)
 
-    model.exploration_schedule = lambda progress_remaining: 0.0
+    model.exploration_initial_eps = 0.1
+    model.exploration_final_eps = 0
 
     try:
         model.learn(
