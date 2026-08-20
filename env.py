@@ -35,6 +35,14 @@ class RLSwarm(ParallelEnv):
         self.init_leader_pos = leader_uav.position.copy()
         self.init_leader_orient = leader_uav.orientation
 
+        # Metric tracking variables
+        self.proximity_advances = 0
+        self.ideal_range_tracking = 0
+        self.near_collision_events = 0
+        self.heading_deviations = []
+        self.prev_dl = {}
+        self.step_counter = 0
+
         # UAV setup
         self.dt = np.float32(1.0)
 
@@ -67,6 +75,12 @@ class RLSwarm(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent): return self.action_spaces[agent]
+
+    def _compute_heading_diff_deg(self, uav_orient: float, leader_orient: float) -> float:
+        """Calculates directional heading difference in degrees bounded to [0, 180]."""
+        diff_rad = np.abs(uav_orient - leader_orient)
+        diff_rad = np.arctan2(np.sin(diff_rad), np.cos(diff_rad))
+        return float(np.degrees(diff_rad))
 
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
@@ -123,6 +137,19 @@ class RLSwarm(ParallelEnv):
             uav.prev_dc = np.linalg.norm(uav.position - init_centroid)
             uav.prev_dl = np.linalg.norm(uav.position - self.leader.position)
             observations[agent] = self._get_obs(agent)
+
+        # Reset metric counters on episode reset
+        self.proximity_advances = 0
+        self.ideal_range_tracking = 0
+        self.near_collision_events = 0
+        self.heading_deviations = []
+        self.step_counter = 0
+
+        # Store initial distance to leader for each follower
+        self.prev_dl = {
+            agent_id: np.linalg.norm(uav.position - self.leader.position)
+            for agent_id, uav in self.followers.items()
+        }
         
         info = {}
         if self.render_mode == "human":
@@ -144,8 +171,10 @@ class RLSwarm(ParallelEnv):
             else: uav.angular_direction = 0
             uav.step(self.dt)
 
-        # 2. Pre-calculate group metrics for rewards
+        self.step_counter += 1
+        step_heading_diffs = []
 
+        # 2. Pre-calculate group metrics for rewards
         all_pos = np.array([u.position for u in self.followers.values()] + [self.leader.position])
         centroid = np.mean(all_pos, axis=0) #
         
@@ -207,6 +236,28 @@ class RLSwarm(ParallelEnv):
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
             infos[agent_id] = {}
+
+            # Metrics Calculation
+            # 1. Proximity Advances (distance to leader decreased)
+            if current_dl < self.prev_dl.get(agent_id, current_dl):
+                self.proximity_advances += 1
+            self.prev_dl[agent_id] = current_dl
+
+            # 2. Ideal Range Tracking (d1 <= distance <= d2)
+            if self.d1 <= current_dl <= self.d2:
+                self.ideal_range_tracking += 1
+
+            # 3. Near-Collision Events (distance < d1)
+            if current_dl < self.d1:
+                self.near_collision_events += 1
+
+            # 4. Heading Consistency (angular error in degrees)
+            h_diff = self._compute_heading_diff_deg(float(uav.orientation), float(self.leader.orientation))
+            step_heading_diffs.append(h_diff)
+            self.heading_deviations.append(h_diff)
+
+        step_avg_heading = np.mean(step_heading_diffs) if step_heading_diffs else 0.0
+        cum_avg_heading = np.mean(self.heading_deviations) if self.heading_deviations else 0.0
         
         leader_out_of_bounds = np.any(self.leader.position < 0) or np.any(self.leader.position > self.GRID_SIZE)
         if any(terminations.values()):
@@ -220,6 +271,16 @@ class RLSwarm(ParallelEnv):
 
         if self.render_mode == "human":
             self._render_frame()
+
+        # Live metric logging directly from the step method
+        print(
+            f"Step {self.step_counter:4d} | "
+            f"Proximity Adv: {self.proximity_advances:5d} | "
+            f"Ideal Range: {self.ideal_range_tracking:5d} | "
+            f"Near Collisions: {self.near_collision_events:4d} | "
+            f"Step Hdg Dev: {step_avg_heading:5.1f}° | "
+            f"Cum Hdg Dev: {cum_avg_heading:5.1f}°"
+        )
 
         return observations, rewards, terminations, truncations, infos
     
