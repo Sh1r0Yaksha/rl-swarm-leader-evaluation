@@ -6,6 +6,7 @@ import pygame
 import numpy as np
 from UAV import UAV, Follower, Leader
 import os
+import csv
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,9 +24,10 @@ class RLSwarm(ParallelEnv):
     w_CoA = -20
     w_CoM = 1
     w_Coh = 2
-    w_Ali1 = 5
-    w_Ali2 = -1
-    def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None):
+    w_Ali1 = 20
+    w_Ali2 = -4
+    w_CwB = -100
+    def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
         super(RLSwarm, self).__init__()
 
         self.n_agents = num_agents
@@ -41,7 +43,13 @@ class RLSwarm(ParallelEnv):
         self.near_collision_events = 0
         self.heading_deviations = []
         self.prev_dl = {}
+        self.run_count = 0
         self.step_counter = 0
+
+        # CSV Logging Setup
+        self.log_csv = log_csv
+        if self.log_csv:
+            self.csv_filepath = self._init_csv_file()
 
         # UAV setup
         self.dt = np.float32(1.0)
@@ -75,6 +83,59 @@ class RLSwarm(ParallelEnv):
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent): return self.action_spaces[agent]
+
+    def _init_csv_file(self, folder="metrics", prefix="metrics_", ext=".csv") -> str:
+        """Creates the 'metrics' directory and returns the next auto-incremented filepath."""
+        os.makedirs(folder, exist_ok=True)
+        counter = 1
+        while True:
+            filepath = os.path.join(folder, f"{prefix}{counter}{ext}")
+            if not os.path.exists(filepath):
+                break
+            counter += 1
+
+        fieldnames = [
+            "Run",
+            "Steps",
+            "Proximity Advances",
+            "Ideal Range Tracking",
+            "Near-Collision Events",
+            "Heading Consistency",
+        ]
+        with open(filepath, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+
+        return filepath
+
+    def _log_run_to_csv(self):
+        """Appends the accumulated metric totals for the current run as a row in the CSV."""
+        if not self.log_csv or self.step_counter == 0:
+            return
+
+        self.run_count += 1
+        avg_heading = float(np.mean(self.heading_deviations)) if self.heading_deviations else 0.0
+
+        row = {
+            "Run": self.run_count,
+            "Steps": self.step_counter,
+            "Proximity Advances": self.proximity_advances,
+            "Ideal Range Tracking": self.ideal_range_tracking,
+            "Near-Collision Events": self.near_collision_events,
+            "Heading Consistency": round(avg_heading, 2),
+        }
+
+        fieldnames = [
+            "Run",
+            "Steps",
+            "Proximity Advances",
+            "Ideal Range Tracking",
+            "Near-Collision Events",
+            "Heading Consistency",
+        ]
+        with open(self.csv_filepath, mode="a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writerow(row)
 
     def _compute_heading_diff_deg(self, uav_orient: float, leader_orient: float) -> float:
         """Calculates directional heading difference in degrees bounded to [0, 180]."""
@@ -233,6 +294,8 @@ class RLSwarm(ParallelEnv):
             # Boundary & Step Logic
             out_of_bounds = np.any(uav.position < 0) or np.any(uav.position > self.GRID_SIZE)
             terminations[agent_id] = out_of_bounds
+            if (out_of_bounds):
+                rewards[agent_id] += self.w_CwB
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
             infos[agent_id] = {}
@@ -259,28 +322,27 @@ class RLSwarm(ParallelEnv):
         step_avg_heading = np.mean(step_heading_diffs) if step_heading_diffs else 0.0
         cum_avg_heading = np.mean(self.heading_deviations) if self.heading_deviations else 0.0
         
-        leader_out_of_bounds = np.any(self.leader.position < 0) or np.any(self.leader.position > self.GRID_SIZE)
         if any(terminations.values()):
-            for agent_id in self.followers:
-                terminations[agent_id] = True
-                rewards[agent_id] -= 100
-
-        if leader_out_of_bounds:
             for agent_id in self.followers:
                 terminations[agent_id] = True
 
         if self.render_mode == "human":
             self._render_frame()
 
-        # Live metric logging directly from the step method
-        print(
-            f"Step {self.step_counter:4d} | "
-            f"Proximity Adv: {self.proximity_advances:5d} | "
-            f"Ideal Range: {self.ideal_range_tracking:5d} | "
-            f"Near Collisions: {self.near_collision_events:4d} | "
-            f"Step Hdg Dev: {step_avg_heading:5.1f}° | "
-            f"Cum Hdg Dev: {cum_avg_heading:5.1f}°"
-        )
+        # # Live metric logging directly from the step method
+        # print(
+        #     f"Step {self.step_counter:4d} | "
+        #     f"Proximity Adv: {self.proximity_advances:5d} | "
+        #     f"Ideal Range: {self.ideal_range_tracking:5d} | "
+        #     f"Near Collisions: {self.near_collision_events:4d} | "
+        #     f"Step Hdg Dev: {step_avg_heading:5.1f}° | "
+        #     f"Cum Hdg Dev: {cum_avg_heading:5.1f}°"
+        # )
+
+        # Log metrics to CSV if all agents terminate/truncate
+        all_done = all(terminations.values()) or all(truncations.values())
+        if all_done:
+            self._log_run_to_csv()
 
         return observations, rewards, terminations, truncations, infos
     
@@ -362,8 +424,10 @@ class RLSwarm(ParallelEnv):
         return start_point, end_point, w1, w2
         
 
-
     def close(self):
+        if self.step_counter > 0:
+            self._log_run_to_csv()
+            self.step_counter = 0
         if self.window is not None:
             pygame.display.quit()
             pygame.quit()
