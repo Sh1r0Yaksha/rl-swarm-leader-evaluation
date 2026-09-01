@@ -1,9 +1,9 @@
 import os
 import numpy as np
 from dotenv import load_dotenv
-from env import RLSwarm
+from RL_zeng.env import RLZeng
 from UAV import Leader
-from extended_boid import ExtendedBoidModel
+from extended_boid.extended_boid import ExtendedBoidModel
 
 load_dotenv()
 
@@ -16,7 +16,7 @@ def test_boid():
     leader = Leader(position=pos, orientation=hdg)
     
     # Initialize env (Set log_csv=True to automatically write metrics to CSV)
-    env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
+    env = RLZeng(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
     boid = ExtendedBoidModel(followers=env.followers, leader=env.leader)
 
     obs, info = env.reset()

@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import supersuit as ss
 from stable_baselines3 import DQN
-from env import RLSwarm
+from RL_zeng.env import RLZeng
 from UAV import Leader
 
 load_dotenv()
@@ -19,7 +19,7 @@ def make_env():
     hdg = np.float32(np.random.uniform(-np.pi, np.pi))
     leader = Leader(position=pos,
                     orientation=hdg)
-    env = RLSwarm(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
+    env = RLZeng(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
     # env = ss.black_death_v3(env)
     env = ss.pad_observations_v0(env)
     return env

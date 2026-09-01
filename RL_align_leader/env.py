@@ -14,7 +14,7 @@ load_dotenv()
 RENDER_FPS = int(os.getenv("RENDER_FPS", "150"))
 RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 
-class RLSwarm(ParallelEnv):
+class RLZeng(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"]}
     GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
     d1 = int(os.getenv("D1", "5"))
@@ -28,7 +28,7 @@ class RLSwarm(ParallelEnv):
     w_Ali2 = -4
     w_CwB = -100
     def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
-        super(RLSwarm, self).__init__()
+        super(RLZeng, self).__init__()
 
         self.n_agents = num_agents
         self.possible_agents: list[str] = [f"uav_{i}" for i in range(num_agents)]
