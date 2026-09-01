@@ -17,7 +17,7 @@ def test():
     leader = Leader(position=pos,
                     orientation=hdg)
     env = RLSwarm(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
-    # env = ss.black_death_v3(env)
+
     env = ss.pettingzoo_env_to_vec_env_v1(env)
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")
 

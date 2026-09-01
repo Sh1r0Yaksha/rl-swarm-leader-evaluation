@@ -8,8 +8,8 @@ GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
 class UAV:
     def __init__(
         self,
-        speed: np.float32 = np.float32(1.0),# 1 units/frame
-        angular_speed: np.float32 = np.float32(np.radians(4)),
+        speed: np.float32 = np.float32(0.5),# 0.1 units/frame
+        angular_speed: np.float32 = np.float32(np.radians(5)),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
         orientation: np.float32 = np.float32(0.0),
@@ -45,8 +45,8 @@ class UAV:
         vy = self.speed * np.sin(self.orientation)
         velocity = np.array([vx, vy], dtype=np.float32)
 
-        self.position += velocity * dt
         self.orientation += self.angular_direction * self.angular_speed * dt
+        self.position += velocity * dt
 
     def reset(
         self,
@@ -74,11 +74,11 @@ class Leader(UAV):
         self.turn_timer = 0  # Frame counter for smooth steering
 
     def step(self, dt: float, grid_w: float = GRID_SIZE, grid_h: float = GRID_SIZE):
-        margin = 25.0  # Safe distance from boundary
+        margin = GRID_SIZE/10  # Margin from center
         
         # 1. Wall avoidance check
-        if (self.position[0] < margin or self.position[0] > grid_w - margin or
-            self.position[1] < margin or self.position[1] > grid_h - margin):
+        if (self.position[0] < (grid_w/2) - margin or self.position[0] > (grid_w/2) + margin or
+            self.position[1] < (grid_h/2) - margin or self.position[1] > (grid_h/2) + margin):
             
             # Calculate angle pointing toward grid center
             target_angle = np.arctan2((grid_h / 2.0) - self.position[1], (grid_w / 2.0) - self.position[0])

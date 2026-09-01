@@ -58,8 +58,8 @@ class RLSwarm(ParallelEnv):
         self.max_steps = int(os.getenv("EPISODE_TIMESTEPS", "500"))
         self.current_step = 0
 
-        # Shape: 4 (Self pos and orientation) + (n-1 + leader) * 4 (Relative neighbor data)
-        self.obs_shape = 4 + (self.n_agents - 1 + 1) * 4
+        # Shape: 2 (Self orientation) + (n-1 + leader) * 4 (Relative neighbor data)
+        self.obs_shape = 2 + (self.n_agents - 1 + 1) * 4
 
         self.observation_spaces = {
             agent: spaces.Box(low=-1.0, high=1.0, shape=(self.obs_shape,), dtype=np.float32)
@@ -146,11 +146,9 @@ class RLSwarm(ParallelEnv):
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
 
-        # 1. Start with self pos and orientation
+        # 1. Start with self orientation
         
-        obs = [uav.position[0] / self.GRID_SIZE,
-               uav.position[1] / self.GRID_SIZE,
-               np.sin(uav.orientation),
+        obs = [np.sin(uav.orientation),
                np.cos(uav.orientation)]
 
         # 2. Add the leaders observation
@@ -179,15 +177,17 @@ class RLSwarm(ParallelEnv):
     def reset(self, seed=None, options=None):
         observations = {}
         self.current_step = 0
-        leader_x = np.float32(np.random.uniform(self.GRID_SIZE/10, self.GRID_SIZE - self.GRID_SIZE/10))
-        leader_y = np.float32(np.random.uniform(self.GRID_SIZE/10, self.GRID_SIZE - self.GRID_SIZE/10))
+        leader_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
+        leader_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
         leader_pos = np.array([leader_x, leader_y])
         leader_hdg = np.float32(np.random.uniform(-np.pi, np.pi))
         self.leader.reset(leader_pos, leader_hdg)
 
         initial_positions = [self.leader.position]
         for id, uav in self.followers.items():
-            pos = np.random.uniform(100, self.GRID_SIZE - 100, size=(2,)).astype(np.float32)
+            pos_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
+            pos_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
+            pos = np.array([pos_x, pos_y])
             orient = np.float32(np.random.uniform(-np.pi, np.pi))
             uav.reset(pos, orient)
             initial_positions.append(pos)
@@ -276,6 +276,7 @@ class RLSwarm(ParallelEnv):
                 r_Ali = self.w_Ali1
             elif current_dl > prev_dl:
                 r_Ali = self.w_Ali2
+            uav.prev_dl = current_dl
 
             # d) Connectivity Maintenance: Reward for staying in 'Flight Zone'
             # Flight zone is defined between d1 and d3

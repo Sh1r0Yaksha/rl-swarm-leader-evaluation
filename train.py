@@ -15,7 +15,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
 
 def make_env():
-    pos = np.random.uniform(100, GRID_SIZE - 100, size=2).astype(np.float32)
+    pos = np.random.uniform(0, GRID_SIZE, size=2).astype(np.float32)
     hdg = np.float32(np.random.uniform(-np.pi, np.pi))
     leader = Leader(position=pos,
                     orientation=hdg)

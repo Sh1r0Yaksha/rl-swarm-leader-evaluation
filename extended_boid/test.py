@@ -3,7 +3,7 @@ import numpy as np
 from dotenv import load_dotenv
 from env import RLSwarm
 from UAV import Leader
-from boid_model import ExtendedBoidModel
+from extended_boid import ExtendedBoidModel
 
 load_dotenv()
 
