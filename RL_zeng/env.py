@@ -17,6 +17,7 @@ RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 class RLZeng(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"]}
     GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+    spawn_margin = GRID_SIZE/10
     d1 = int(os.getenv("D1", "5"))
     d2 = int(os.getenv("D2", "10"))
     d3 = int(os.getenv("D3", "20"))
@@ -26,7 +27,7 @@ class RLZeng(ParallelEnv):
     w_Coh = 2
     w_Ali1 = 20
     w_Ali2 = -4
-    w_CwB = -100
+    w_CwB = 0
     def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
         super(RLZeng, self).__init__()
 
@@ -177,16 +178,16 @@ class RLZeng(ParallelEnv):
     def reset(self, seed=None, options=None):
         observations = {}
         self.current_step = 0
-        leader_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
-        leader_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
+        leader_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
+        leader_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
         leader_pos = np.array([leader_x, leader_y])
         leader_hdg = np.float32(np.random.uniform(-np.pi, np.pi))
         self.leader.reset(leader_pos, leader_hdg)
 
         initial_positions = [self.leader.position]
         for id, uav in self.followers.items():
-            pos_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
-            pos_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
+            pos_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
+            pos_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
             pos = np.array([pos_x, pos_y])
             orient = np.float32(np.random.uniform(-np.pi, np.pi))
             uav.reset(pos, orient)

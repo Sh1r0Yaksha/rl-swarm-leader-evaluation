@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 import supersuit as ss
-from RL_zeng.env import RLZeng
+from RL_align_leader.env import RLAlignLeader
 from stable_baselines3 import DQN
 import numpy as np
 from UAV import Leader
@@ -16,7 +16,7 @@ def test():
     hdg = np.float32(np.random.uniform(-np.pi, np.pi))
     leader = Leader(position=pos,
                     orientation=hdg)
-    env = RLZeng(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
+    env = RLAlignLeader(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
 
     env = ss.pettingzoo_env_to_vec_env_v1(env)
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")

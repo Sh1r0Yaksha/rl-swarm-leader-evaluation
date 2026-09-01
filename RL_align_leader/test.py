@@ -22,7 +22,9 @@ def test():
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")
 
     try:
-        model = DQN.load(os.getenv("SAVE_NAME", "swarm_model"), env=env)
+        file_name = os.getenv("SAVE_NAME", "swarm_model")
+        file_path = f"models/{file_name}" 
+        model = DQN.load(file_path, env=env)
         print("Model loaded successfully!")
     except FileNotFoundError:
         print("Model file not found. Check the filename.")

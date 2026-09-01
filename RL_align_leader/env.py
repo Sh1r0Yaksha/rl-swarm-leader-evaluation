@@ -14,21 +14,23 @@ load_dotenv()
 RENDER_FPS = int(os.getenv("RENDER_FPS", "150"))
 RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 
-class RLZeng(ParallelEnv):
+class RLAlignLeader(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"]}
     GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+    spawn_margin = GRID_SIZE/10
     d1 = int(os.getenv("D1", "5"))
     d2 = int(os.getenv("D2", "10"))
     d3 = int(os.getenv("D3", "20"))
     discount_factor = 0.75
     w_CoA = -20
-    w_CoM = 1
-    w_Coh = 2
+    w_CoM = 0
+    w_Coh = 0
     w_Ali1 = 20
     w_Ali2 = -4
-    w_CwB = -100
+    w_CwB = 0
+    w_Hdg_align = 20.0   # weight with range [-20.0, +20.0] for leader heading
     def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
-        super(RLZeng, self).__init__()
+        super(RLAlignLeader, self).__init__()
 
         self.n_agents = num_agents
         self.possible_agents: list[str] = [f"uav_{i}" for i in range(num_agents)]
@@ -143,6 +145,14 @@ class RLZeng(ParallelEnv):
         diff_rad = np.arctan2(np.sin(diff_rad), np.cos(diff_rad))
         return float(np.degrees(diff_rad))
 
+    def _compute_orientation_error(self, uav_orient: np.float32, leader_orient: np.float32) -> np.float32:
+        """Calculates absolute heading difference wrapped to [0, pi] radians."""
+        diff = np.arctan2(
+            np.sin(uav_orient - leader_orient),
+            np.cos(uav_orient - leader_orient)
+        )
+        return np.float32(np.abs(diff))
+
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
 
@@ -177,16 +187,16 @@ class RLZeng(ParallelEnv):
     def reset(self, seed=None, options=None):
         observations = {}
         self.current_step = 0
-        leader_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
-        leader_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/10, (self.GRID_SIZE/2) + self.GRID_SIZE/10))
+        leader_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
+        leader_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
         leader_pos = np.array([leader_x, leader_y])
         leader_hdg = np.float32(np.random.uniform(-np.pi, np.pi))
         self.leader.reset(leader_pos, leader_hdg)
 
         initial_positions = [self.leader.position]
         for id, uav in self.followers.items():
-            pos_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
-            pos_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.GRID_SIZE/5, (self.GRID_SIZE/2) + self.GRID_SIZE/5))
+            pos_x = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
+            pos_y = np.float32(np.random.uniform((self.GRID_SIZE/2) - self.spawn_margin, (self.GRID_SIZE/2) + self.spawn_margin))
             pos = np.array([pos_x, pos_y])
             orient = np.float32(np.random.uniform(-np.pi, np.pi))
             uav.reset(pos, orient)
@@ -246,8 +256,8 @@ class RLZeng(ParallelEnv):
             r_CoA = 0  # Collision Avoidance
             r_Coh = 0  # Cohesion
             r_CoM = 0  # Connectivity Maintenance
-            r_Ali = 0  # Alignment (Leader-Following)
-
+            r_Ali = 0  # Distance Alignment (Leader)
+            r_Hdg = 0  # Angle Alignment (Leader)
 
             current_dc = np.linalg.norm(uav.position - centroid)
             current_dl = np.linalg.norm(uav.position - self.leader.position)
@@ -271,12 +281,19 @@ class RLZeng(ParallelEnv):
             uav.prev_dc = current_dc
 
             # c) Alignment with Leader: Reward for moving closer to the Leader
+            # Distance
             prev_dl = uav.prev_dl
             if current_dl < prev_dl:
                 r_Ali = self.w_Ali1
             elif current_dl > prev_dl:
                 r_Ali = self.w_Ali2
             uav.prev_dl = current_dl
+
+            # Angle
+            # Cosine similarity between follower heading and leader heading
+            # Range: [-1.0 (opposite) to +1.0 (perfectly aligned)]
+            cos_sim = np.cos(uav.orientation - self.leader.orientation)
+            r_Hdg = cos_sim * self.w_Hdg_align
 
             # d) Connectivity Maintenance: Reward for staying in 'Flight Zone'
             # Flight zone is defined between d1 and d3
@@ -290,7 +307,7 @@ class RLZeng(ParallelEnv):
                 r_CoM += self.w_CoM
 
             # Final reward summation
-            rewards[agent_id] = r_CoA + r_Coh + r_CoM + r_Ali
+            rewards[agent_id] = r_CoA + r_Coh + r_CoM + r_Ali + r_Hdg
             
             # Boundary & Step Logic
             out_of_bounds = np.any(uav.position < 0) or np.any(uav.position > self.GRID_SIZE)

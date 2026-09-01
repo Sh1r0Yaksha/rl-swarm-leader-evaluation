@@ -4,7 +4,7 @@ import torch
 import numpy as np
 import supersuit as ss
 from stable_baselines3 import DQN
-from RL_zeng.env import RLZeng
+from RL_align_leader.env import RLAlignLeader
 from UAV import Leader
 
 load_dotenv()
@@ -19,7 +19,7 @@ def make_env():
     hdg = np.float32(np.random.uniform(-np.pi, np.pi))
     leader = Leader(position=pos,
                     orientation=hdg)
-    env = RLZeng(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
+    env = RLAlignLeader(leader_uav=leader, num_agents=int(os.getenv("NUM_AGENTS", "16")), render_mode=None)
     # env = ss.black_death_v3(env)
     env = ss.pad_observations_v0(env)
     return env
@@ -52,7 +52,9 @@ def train():
             log_interval=1
         )
     finally:
-        model.save(os.getenv("SAVE_NAME", "swarm_model"))
+        file_name = os.getenv("SAVE_NAME", "swarm_model")
+        file_path = f"models/{file_name}" 
+        model.save(file_path)
         env.close()
 
 if __name__ == "__main__":
