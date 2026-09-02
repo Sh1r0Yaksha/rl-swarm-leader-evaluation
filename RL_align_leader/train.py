@@ -41,7 +41,6 @@ def train():
         gamma=0.75,
         verbose=1,
         tensorboard_log="./tb_logs/",
-        exploration_fraction=0.9,
         device="cuda" if torch.cuda.is_available() else "cpu"
     )
 

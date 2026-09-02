@@ -13,7 +13,7 @@ GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
 def test():
     num_uavs = int(os.getenv("NUM_AGENTS", "16"))
     leader = Leader()
-    env = RLAlignLeader(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
+    env = RLAlignLeader(leader_uav=leader, num_agents=num_uavs, render_mode=None, log_csv=True)
 
     env = ss.pettingzoo_env_to_vec_env_v1(env)
     env = ss.concat_vec_envs_v1(env, 1, num_cpus=1, base_class="stable_baselines3")

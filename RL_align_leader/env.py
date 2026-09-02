@@ -25,9 +25,9 @@ class RLAlignLeader(ParallelEnv):
     w_CoA = -20
     w_CoM = 2
     w_Coh = 1
-    w_Ali1 = 5
-    w_Ali2 = -1
-    w_Hdg_align = 40.0   # weight with range [-20.0, +20.0] for leader heading
+    w_Ali1 = 20
+    w_Ali2 = -4
+    w_Hdg_align = 20.0   # weight with range [-20.0, +20.0] for leader heading
 
     def __init__(self, leader_uav: Leader, num_agents: int = 5, render_mode=None, log_csv=False):
         super(RLAlignLeader, self).__init__()

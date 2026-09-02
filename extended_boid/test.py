@@ -16,7 +16,7 @@ def test_boid():
     leader = Leader(position=pos, orientation=hdg)
     
     # Initialize env (Set log_csv=True to automatically write metrics to CSV)
-    env = RLZeng(leader_uav=leader, num_agents=num_uavs, render_mode="human", log_csv=True)
+    env = RLZeng(leader_uav=leader, num_agents=num_uavs, render_mode=None, log_csv=True)
     boid = ExtendedBoidModel(followers=env.followers, leader=env.leader)
 
     obs, info = env.reset()
