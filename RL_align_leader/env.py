@@ -23,12 +23,12 @@ class RLAlignLeader(ParallelEnv):
     d3 = int(os.getenv("D3", "20"))
     discount_factor = 0.75
     w_CoA = -20
-    w_CoM = 0
-    w_Coh = 0
-    w_Ali1 = 20
-    w_Ali2 = -4
+    w_CoM = 2
+    w_Coh = 1
+    w_Ali1 = 5
+    w_Ali2 = -1
     w_CwB = 0
-    w_Hdg_align = 20.0   # weight with range [-20.0, +20.0] for leader heading
+    w_Hdg_align = 40.0   # weight with range [-20.0, +20.0] for leader heading
     def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
         super(RLAlignLeader, self).__init__()
 
@@ -60,8 +60,9 @@ class RLAlignLeader(ParallelEnv):
         self.max_steps = int(os.getenv("EPISODE_TIMESTEPS", "500"))
         self.current_step = 0
 
-        # Shape: 2 (Self orientation) + (n-1 + leader) * 4 (Relative neighbor data)
-        self.obs_shape = 2 + (self.n_agents - 1 + 1) * 4
+        # Each target now uses 6 features: [local_x, local_y, sin_diff, cos_diff, is_leader, is_follower]
+        self.features_per_entity = 6
+        self.obs_shape = (self.n_agents - 1 + 1) * self.features_per_entity
 
         self.observation_spaces = {
             agent: spaces.Box(low=-1.0, high=1.0, shape=(self.obs_shape,), dtype=np.float32)
@@ -155,27 +156,44 @@ class RLAlignLeader(ParallelEnv):
 
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
+        obs = []
 
-        # 1. Start with self orientation
-        
-        obs = [np.sin(uav.orientation),
-               np.cos(uav.orientation)]
+        # 1. Leader observation (is_leader=True)
+        obs.extend(self._rel_obs(uav, self.leader, is_leader=True))
 
-        # 2. Add the leaders observation
-        obs.extend(self._rel_obs(uav, self.leader))
-
-        # 3. Add OTHER Learning agents relative to this one
+        # 2. Other follower observations (is_leader=False)
         for other_id, other_uav in self.followers.items():
             if other_id != agent_id:
-                obs.extend(self._rel_obs(uav, other_uav))        
+                obs.extend(self._rel_obs(uav, other_uav, is_leader=False))
 
         return np.array(obs, dtype=np.float32)
     
-    def _rel_obs(self, main_uav, target_uav):
-        """Helper to calculate relative position and heading"""
-        rel_pos = (target_uav.position - main_uav.position) / self.GRID_SIZE
+    def _rel_obs(self, main_uav, target_uav, is_leader: bool = False):
+        """Calculates relative spatial features + 1-hot entity type encoding."""
+        rel_pos_global = target_uav.position - main_uav.position
+
+        cos_theta = np.cos(main_uav.orientation)
+        sin_theta = np.sin(main_uav.orientation)
+
+        local_x = rel_pos_global[0] * cos_theta + rel_pos_global[1] * sin_theta
+        local_y = -rel_pos_global[0] * sin_theta + rel_pos_global[1] * cos_theta
+
+        max_diag = self.GRID_SIZE * np.sqrt(2.0, dtype=np.float32)
+        norm_local_pos = np.array([local_x, local_y], dtype=np.float32) / max_diag
+
         diff_angle = target_uav.orientation - main_uav.orientation
-        return [rel_pos[0], rel_pos[1], np.sin(diff_angle), np.cos(diff_angle)]
+
+        # 1-hot encoding: [1.0, 0.0] = Leader, [0.0, 1.0] = Peer Follower
+        entity_flag = [1.0, 0.0] if is_leader else [0.0, 1.0]
+
+        return [
+            norm_local_pos[0],
+            norm_local_pos[1],
+            np.sin(diff_angle),
+            np.cos(diff_angle),
+            entity_flag[0],
+            entity_flag[1]
+        ]
     
     def set_init_leader_state(self,
                               pos: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
@@ -247,7 +265,7 @@ class RLAlignLeader(ParallelEnv):
 
         # 2. Pre-calculate group metrics for rewards
         all_pos = np.array([u.position for u in self.followers.values()] + [self.leader.position])
-        centroid = np.mean(all_pos, axis=0) #
+        centroid = np.mean(all_pos) #
         
         observations, rewards, terminations, truncations, infos = {}, {}, {}, {}, {}
 
@@ -293,7 +311,10 @@ class RLAlignLeader(ParallelEnv):
             # Cosine similarity between follower heading and leader heading
             # Range: [-1.0 (opposite) to +1.0 (perfectly aligned)]
             cos_sim = np.cos(uav.orientation - self.leader.orientation)
-            r_Hdg = cos_sim * self.w_Hdg_align
+            if cos_sim >= 0:
+               r_Hdg = self.w_Hdg_align
+            else:
+                r_Hdg = cos_sim * self.w_Hdg_align
 
             # d) Connectivity Maintenance: Reward for staying in 'Flight Zone'
             # Flight zone is defined between d1 and d3

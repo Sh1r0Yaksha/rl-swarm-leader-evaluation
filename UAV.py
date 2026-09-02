@@ -4,11 +4,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
+FOLLOWER_SPEED = np.float32(os.getenv("FOLLOWER_SPEED", "0.5"))
+LEADER_SPEED_MULTIPLIER = np.float32(os.getenv("LEADER_SPEED_MULTIPLIER", "0.6"))
 
 class UAV:
     def __init__(
         self,
-        speed: np.float32 = np.float32(0.5),# 0.1 units/frame
+        speed: np.float32 = FOLLOWER_SPEED,# 0.5 units/frame
         angular_speed: np.float32 = np.float32(np.radians(5)),
         angular_direction: int = 0,
         position: np.ndarray = np.array([0.0, 0.0], dtype=np.float32), 
@@ -71,6 +73,7 @@ class Follower(UAV):
 class Leader(UAV):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.speed = FOLLOWER_SPEED * LEADER_SPEED_MULTIPLIER
         self.turn_timer = 0  # Frame counter for smooth steering
 
     def step(self, dt: float, grid_w: float = GRID_SIZE, grid_h: float = GRID_SIZE):
