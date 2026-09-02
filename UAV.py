@@ -42,7 +42,7 @@ class UAV:
         # Normalizes any angle to the range [-pi, pi]
         self._orientation = np.float32(((value + np.pi) % (2 * np.pi)) - np.pi)
 
-    def step(self, dt: float):
+    def step(self, dt: np.float32):
         vx = self.speed * np.cos(self.orientation)
         vy = self.speed * np.sin(self.orientation)
         velocity = np.array([vx, vy], dtype=np.float32)
@@ -76,7 +76,7 @@ class Leader(UAV):
         self.speed = FOLLOWER_SPEED * LEADER_SPEED_MULTIPLIER
         self.turn_timer = 0  # Frame counter for smooth steering
 
-    def step(self, dt: float, grid_w: float = GRID_SIZE, grid_h: float = GRID_SIZE):
+    def step(self, dt: np.float32, grid_w: float = GRID_SIZE, grid_h: float = GRID_SIZE):
         margin = GRID_SIZE/10  # Margin from center
         
         # 1. Wall avoidance check
