@@ -17,7 +17,7 @@ RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 class RLZeng(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"]}
     GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
-    spawn_margin = GRID_SIZE/10
+    spawn_margin = GRID_SIZE / 10
     d1 = int(os.getenv("D1", "5"))
     d2 = int(os.getenv("D2", "10"))
     d3 = int(os.getenv("D3", "20"))
@@ -27,8 +27,8 @@ class RLZeng(ParallelEnv):
     w_Coh = 2
     w_Ali1 = 20
     w_Ali2 = -4
-    w_CwB = 0
-    def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
+
+    def __init__(self, leader_uav: Leader, num_agents: int = 5, render_mode=None, log_csv=False):
         super(RLZeng, self).__init__()
 
         self.n_agents = num_agents
@@ -43,6 +43,12 @@ class RLZeng(ParallelEnv):
         self.ideal_range_tracking = 0
         self.near_collision_events = 0
         self.heading_deviations = []
+    
+        self.psi_values = []
+        self.rg_values = []
+        self.mnnd_values = []
+        self.lambda2_values = []
+
         self.prev_dl = {}
         self.run_count = 0
         self.step_counter = 0
@@ -59,8 +65,9 @@ class RLZeng(ParallelEnv):
         self.max_steps = int(os.getenv("EPISODE_TIMESTEPS", "500"))
         self.current_step = 0
 
-        # Shape: 2 (Self orientation) + (n-1 + leader) * 4 (Relative neighbor data)
-        self.obs_shape = 2 + (self.n_agents - 1 + 1) * 4
+        # Body-frame observations: [local_x, local_y, sin_diff, cos_diff] per entity (Leader + N-1 Followers = N entities)
+        self.features_per_entity = 4
+        self.obs_shape = self.n_agents * self.features_per_entity
 
         self.observation_spaces = {
             agent: spaces.Box(low=-1.0, high=1.0, shape=(self.obs_shape,), dtype=np.float32)
@@ -85,7 +92,7 @@ class RLZeng(ParallelEnv):
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent): return self.action_spaces[agent]
 
-    def _init_csv_file(self, folder="metrics", prefix="metrics_", ext=".csv") -> str:
+    def _init_csv_file(self, folder="metrics", prefix="metrics_zeng_", ext=".csv") -> str:
         """Creates the 'metrics' directory and returns the next auto-incremented filepath."""
         os.makedirs(folder, exist_ok=True)
         counter = 1
@@ -102,6 +109,10 @@ class RLZeng(ParallelEnv):
             "Ideal Range Tracking",
             "Near-Collision Events",
             "Heading Consistency",
+            "Polar Order Parameter (Psi)",
+            "Radius of Gyration (Rg)",
+            "Mean Nearest-Neighbor Distance (MNND)",
+            "Algebraic Connectivity (Lambda2)",
         ]
         with open(filepath, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -116,6 +127,10 @@ class RLZeng(ParallelEnv):
 
         self.run_count += 1
         avg_heading = float(np.mean(self.heading_deviations)) if self.heading_deviations else 0.0
+        avg_psi = float(np.mean(self.psi_values)) if self.psi_values else 0.0
+        avg_rg = float(np.mean(self.rg_values)) if self.rg_values else 0.0
+        avg_mnnd = float(np.mean(self.mnnd_values)) if self.mnnd_values else 0.0
+        avg_lambda2 = float(np.mean(self.lambda2_values)) if self.lambda2_values else 0.0
 
         row = {
             "Run": self.run_count,
@@ -124,6 +139,10 @@ class RLZeng(ParallelEnv):
             "Ideal Range Tracking": self.ideal_range_tracking,
             "Near-Collision Events": self.near_collision_events,
             "Heading Consistency": round(avg_heading, 2),
+            "Polar Order Parameter (Psi)": round(avg_psi, 4),
+            "Radius of Gyration (Rg)": round(avg_rg, 4),
+            "Mean Nearest-Neighbor Distance (MNND)": round(avg_mnnd, 4),
+            "Algebraic Connectivity (Lambda2)": round(avg_lambda2, 4),
         }
 
         fieldnames = [
@@ -133,6 +152,10 @@ class RLZeng(ParallelEnv):
             "Ideal Range Tracking",
             "Near-Collision Events",
             "Heading Consistency",
+            "Polar Order Parameter (Psi)",
+            "Radius of Gyration (Rg)",
+            "Mean Nearest-Neighbor Distance (MNND)",
+            "Algebraic Connectivity (Lambda2)",
         ]
         with open(self.csv_filepath, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -146,34 +169,39 @@ class RLZeng(ParallelEnv):
 
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
+        obs = []
 
-        # 1. Start with self orientation
-        
-        obs = [np.sin(uav.orientation),
-               np.cos(uav.orientation)]
-
-        # 2. Add the leaders observation
+        # 1. Leader observation
         obs.extend(self._rel_obs(uav, self.leader))
 
-        # 3. Add OTHER Learning agents relative to this one
+        # 2. Other follower observations
         for other_id, other_uav in self.followers.items():
             if other_id != agent_id:
-                obs.extend(self._rel_obs(uav, other_uav))        
+                obs.extend(self._rel_obs(uav, other_uav))
 
         return np.array(obs, dtype=np.float32)
     
     def _rel_obs(self, main_uav, target_uav):
-        """Helper to calculate relative position and heading"""
-        rel_pos = (target_uav.position - main_uav.position) / self.GRID_SIZE
+        """Calculates body-frame relative position coordinates and heading trigonometric differences."""
+        rel_pos_global = target_uav.position - main_uav.position
+
+        cos_theta = np.cos(main_uav.orientation)
+        sin_theta = np.sin(main_uav.orientation)
+
+        local_x = rel_pos_global[0] * cos_theta + rel_pos_global[1] * sin_theta
+        local_y = -rel_pos_global[0] * sin_theta + rel_pos_global[1] * cos_theta
+
+        max_diag = self.GRID_SIZE * np.sqrt(2.0, dtype=np.float32)
+        norm_local_pos = np.array([local_x, local_y], dtype=np.float32) / max_diag
+
         diff_angle = target_uav.orientation - main_uav.orientation
-        return [rel_pos[0], rel_pos[1], np.sin(diff_angle), np.cos(diff_angle)]
-    
-    def set_init_leader_state(self,
-                              pos: np.ndarray = np.array([0.0, 0.0], dtype=np.float32),
-                              orient: np.float32 = np.float32(0.0)):
-        """Method to update the starting position from outside"""
-        self.init_leader_pos = pos
-        self.init_leader_orient = orient
+
+        return [
+            norm_local_pos[0],
+            norm_local_pos[1],
+            np.sin(diff_angle),
+            np.cos(diff_angle)
+        ]
 
     def reset(self, seed=None, options=None):
         observations = {}
@@ -205,6 +233,10 @@ class RLZeng(ParallelEnv):
         self.ideal_range_tracking = 0
         self.near_collision_events = 0
         self.heading_deviations = []
+        self.psi_values = []
+        self.rg_values = []
+        self.mnnd_values = []
+        self.lambda2_values = []
         self.step_counter = 0
 
         # Store initial distance to leader for each follower
@@ -221,7 +253,6 @@ class RLZeng(ParallelEnv):
     
     def step(self, actions):
         self.current_step += 1
-        
         self.leader.step(self.dt)
 
         # 1. Update UAV Physics
@@ -238,8 +269,41 @@ class RLZeng(ParallelEnv):
 
         # 2. Pre-calculate group metrics for rewards
         all_pos = np.array([u.position for u in self.followers.values()] + [self.leader.position])
-        centroid = np.mean(all_pos, axis=0) #
-        
+        all_orient = np.array([u.orientation for u in self.followers.values()] + [self.leader.orientation])
+        N = len(all_pos)
+        centroid = np.mean(all_pos, axis=0)
+
+        # ----------------------------------------------------
+        # Swarm Metrics Computation
+        # ----------------------------------------------------
+        # 1. Polar Order Parameter (Psi)
+        unit_vecs = np.column_stack((np.cos(all_orient), np.sin(all_orient)))
+        psi = np.linalg.norm(np.sum(unit_vecs, axis=0)) / N
+        self.psi_values.append(psi)
+
+        # 2. Radius of Gyration (Rg)
+        rg = np.sqrt(np.mean(np.sum((all_pos - centroid) ** 2, axis=1)))
+        self.rg_values.append(rg)
+
+        # Pairwise Distances (for MNND and Laplacian)
+        diffs = all_pos[:, np.newaxis, :] - all_pos[np.newaxis, :, :]
+        dist_matrix = np.linalg.norm(diffs, axis=-1)
+
+        # 3. Mean Nearest-Neighbor Distance (MNND)
+        dist_matrix_no_diag = dist_matrix.copy()
+        np.fill_diagonal(dist_matrix_no_diag, np.inf)
+        mnnd = np.mean(np.min(dist_matrix_no_diag, axis=1))
+        self.mnnd_values.append(mnnd)
+
+        # 4. Algebraic Connectivity (Lambda 2)
+        adj_matrix = (dist_matrix_no_diag <= self.d3).astype(float)
+        deg_matrix = np.diag(np.sum(adj_matrix, axis=1))
+        laplacian = deg_matrix - adj_matrix
+        eigvals = np.sort(np.linalg.eigvalsh(laplacian))
+        lambda2 = max(0.0, float(eigvals[1])) if N > 1 else 0.0
+        self.lambda2_values.append(lambda2)
+        # ----------------------------------------------------
+
         observations, rewards, terminations, truncations, infos = {}, {}, {}, {}, {}
 
         for agent_id, uav in self.followers.items():
@@ -248,7 +312,6 @@ class RLZeng(ParallelEnv):
             r_Coh = 0  # Cohesion
             r_CoM = 0  # Connectivity Maintenance
             r_Ali = 0  # Alignment (Leader-Following)
-
 
             current_dc = np.linalg.norm(uav.position - centroid)
             current_dl = np.linalg.norm(uav.position - self.leader.position)
@@ -264,8 +327,7 @@ class RLZeng(ParallelEnv):
                 r_CoA += self.w_CoA
 
             # b) Cohesion: Reward for moving closer to the centroid
-            # Note: Requires tracking previous distance to centroid
-
+            
             prev_dc = uav.prev_dc
             if current_dc < prev_dc:
                 r_Coh = self.w_Coh
@@ -296,8 +358,6 @@ class RLZeng(ParallelEnv):
             # Boundary & Step Logic
             out_of_bounds = np.any(uav.position < 0) or np.any(uav.position > self.GRID_SIZE)
             terminations[agent_id] = out_of_bounds
-            if (out_of_bounds):
-                rewards[agent_id] += self.w_CwB
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
             infos[agent_id] = {}
@@ -321,9 +381,6 @@ class RLZeng(ParallelEnv):
             step_heading_diffs.append(h_diff)
             self.heading_deviations.append(h_diff)
 
-        step_avg_heading = np.mean(step_heading_diffs) if step_heading_diffs else 0.0
-        cum_avg_heading = np.mean(self.heading_deviations) if self.heading_deviations else 0.0
-        
         if any(terminations.values()):
             for agent_id in self.followers:
                 terminations[agent_id] = True
@@ -331,17 +388,6 @@ class RLZeng(ParallelEnv):
         if self.render_mode == "human":
             self._render_frame()
 
-        # # Live metric logging directly from the step method
-        # print(
-        #     f"Step {self.step_counter:4d} | "
-        #     f"Proximity Adv: {self.proximity_advances:5d} | "
-        #     f"Ideal Range: {self.ideal_range_tracking:5d} | "
-        #     f"Near Collisions: {self.near_collision_events:4d} | "
-        #     f"Step Hdg Dev: {step_avg_heading:5.1f}° | "
-        #     f"Cum Hdg Dev: {cum_avg_heading:5.1f}°"
-        # )
-
-        # Log metrics to CSV if all agents terminate/truncate
         all_done = all(terminations.values()) or all(truncations.values())
         if all_done:
             self._log_run_to_csv()
@@ -373,7 +419,7 @@ class RLZeng(ParallelEnv):
         line_width = max(1, int(3 * arrow_multiplier))
         head_angle = 0.4
         
-        # 1. Followers (Blue)
+        # Followers (Blue)
         color = (0, 0, 255)
         for agent_id, uav in self.followers.items():
             start_point, end_point, w1, w2 = self.make_arrow(uav, arrow_length, head_length, head_angle)
@@ -381,7 +427,7 @@ class RLZeng(ParallelEnv):
             pygame.draw.line(canvas, color, end_point, w1, line_width)
             pygame.draw.line(canvas, color, end_point, w2, line_width)
         
-        # 2. Leader (Red)
+        # Leader (Red)
         color = (255, 0, 0)
         start_point, end_point, w1, w2 = self.make_arrow(self.leader, arrow_length, head_length, head_angle)
         pygame.draw.line(canvas, color, start_point, end_point, line_width)
@@ -396,7 +442,6 @@ class RLZeng(ParallelEnv):
                 self.clock.tick(RENDER_FPS)
         else:
             return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
-
 
     def make_arrow(self, uav, arrow_length, head_length, head_angle):
         # Scale UAV coordinates by RENDER_MULTIPLIER
@@ -424,7 +469,6 @@ class RLZeng(ParallelEnv):
         )
         
         return start_point, end_point, w1, w2
-        
 
     def close(self):
         if self.step_counter > 0:

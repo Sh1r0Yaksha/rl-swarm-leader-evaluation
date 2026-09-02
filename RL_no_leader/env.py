@@ -27,7 +27,6 @@ class RLNoLeader(ParallelEnv):
     w_Coh = 1
     w_Ali1 = 0
     w_Ali2 = 0
-    w_CwB = 0
     w_Hdg_align = 0
 
     def __init__(self, leader_uav: Leader, num_agents: int = 5, render_mode=None, log_csv=False):
@@ -372,8 +371,6 @@ class RLNoLeader(ParallelEnv):
             # Boundary & Step Logic
             out_of_bounds = np.any(uav.position < 0) or np.any(uav.position > self.GRID_SIZE)
             terminations[agent_id] = out_of_bounds
-            if out_of_bounds:
-                rewards[agent_id] += self.w_CwB
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
             infos[agent_id] = {}
