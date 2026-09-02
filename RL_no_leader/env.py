@@ -17,7 +17,7 @@ RENDER_MULTIPLIER = int(os.getenv("RENDER_MULTIPLIER", "150"))
 class RLNoLeader(ParallelEnv):
     metadata = {"render_modes": ["human", "rgb_array"]}
     GRID_SIZE = int(os.getenv("GRID_SIZE", "150"))
-    spawn_margin = GRID_SIZE/10
+    spawn_margin = GRID_SIZE / 10
     d1 = int(os.getenv("D1", "5"))
     d2 = int(os.getenv("D2", "10"))
     d3 = int(os.getenv("D3", "20"))
@@ -29,7 +29,8 @@ class RLNoLeader(ParallelEnv):
     w_Ali2 = 0
     w_CwB = 0
     w_Hdg_align = 0
-    def __init__(self, leader_uav: Leader, num_agents:int=5, render_mode=None, log_csv=False):
+
+    def __init__(self, leader_uav: Leader, num_agents: int = 5, render_mode=None, log_csv=False):
         super(RLNoLeader, self).__init__()
 
         self.n_agents = num_agents
@@ -44,6 +45,12 @@ class RLNoLeader(ParallelEnv):
         self.ideal_range_tracking = 0
         self.near_collision_events = 0
         self.heading_deviations = []
+        
+        self.psi_values = []
+        self.rg_values = []
+        self.mnnd_values = []
+        self.lambda2_values = []
+
         self.prev_dl = {}
         self.run_count = 0
         self.step_counter = 0
@@ -60,7 +67,7 @@ class RLNoLeader(ParallelEnv):
         self.max_steps = int(os.getenv("EPISODE_TIMESTEPS", "500"))
         self.current_step = 0
 
-        # Each target now uses 6 features: [local_x, local_y, sin_diff, cos_diff]
+        # Each target uses 4 features: [local_x, local_y, sin_diff, cos_diff]
         self.features_per_entity = 4
         self.obs_shape = (self.n_agents) * self.features_per_entity
 
@@ -104,6 +111,10 @@ class RLNoLeader(ParallelEnv):
             "Ideal Range Tracking",
             "Near-Collision Events",
             "Heading Consistency",
+            "Polar Order Parameter (Psi)",
+            "Radius of Gyration (Rg)",
+            "Mean Nearest-Neighbor Distance (MNND)",
+            "Algebraic Connectivity (Lambda2)",
         ]
         with open(filepath, mode="w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -118,6 +129,10 @@ class RLNoLeader(ParallelEnv):
 
         self.run_count += 1
         avg_heading = float(np.mean(self.heading_deviations)) if self.heading_deviations else 0.0
+        avg_psi = float(np.mean(self.psi_values)) if self.psi_values else 0.0
+        avg_rg = float(np.mean(self.rg_values)) if self.rg_values else 0.0
+        avg_mnnd = float(np.mean(self.mnnd_values)) if self.mnnd_values else 0.0
+        avg_lambda2 = float(np.mean(self.lambda2_values)) if self.lambda2_values else 0.0
 
         row = {
             "Run": self.run_count,
@@ -126,6 +141,10 @@ class RLNoLeader(ParallelEnv):
             "Ideal Range Tracking": self.ideal_range_tracking,
             "Near-Collision Events": self.near_collision_events,
             "Heading Consistency": round(avg_heading, 2),
+            "Polar Order Parameter (Psi)": round(avg_psi, 4),
+            "Radius of Gyration (Rg)": round(avg_rg, 4),
+            "Mean Nearest-Neighbor Distance (MNND)": round(avg_mnnd, 4),
+            "Algebraic Connectivity (Lambda2)": round(avg_lambda2, 4),
         }
 
         fieldnames = [
@@ -135,6 +154,10 @@ class RLNoLeader(ParallelEnv):
             "Ideal Range Tracking",
             "Near-Collision Events",
             "Heading Consistency",
+            "Polar Order Parameter (Psi)",
+            "Radius of Gyration (Rg)",
+            "Mean Nearest-Neighbor Distance (MNND)",
+            "Algebraic Connectivity (Lambda2)",
         ]
         with open(self.csv_filepath, mode="a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -145,14 +168,6 @@ class RLNoLeader(ParallelEnv):
         diff_rad = np.abs(uav_orient - leader_orient)
         diff_rad = np.arctan2(np.sin(diff_rad), np.cos(diff_rad))
         return float(np.degrees(diff_rad))
-
-    def _compute_orientation_error(self, uav_orient: np.float32, leader_orient: np.float32) -> np.float32:
-        """Calculates absolute heading difference wrapped to [0, pi] radians."""
-        diff = np.arctan2(
-            np.sin(uav_orient - leader_orient),
-            np.cos(uav_orient - leader_orient)
-        )
-        return np.float32(np.abs(diff))
 
     def _get_obs(self, agent_id):
         uav = self.followers[agent_id]
@@ -215,11 +230,15 @@ class RLNoLeader(ParallelEnv):
             uav.prev_dl = np.linalg.norm(uav.position - self.leader.position)
             observations[agent] = self._get_obs(agent)
 
-        # Reset metric counters on episode reset
+        # Reset metric counters
         self.proximity_advances = 0
         self.ideal_range_tracking = 0
         self.near_collision_events = 0
         self.heading_deviations = []
+        self.psi_values = []
+        self.rg_values = []
+        self.mnnd_values = []
+        self.lambda2_values = []
         self.step_counter = 0
 
         # Store initial distance to leader for each follower
@@ -236,7 +255,6 @@ class RLNoLeader(ParallelEnv):
     
     def step(self, actions):
         self.current_step += 1
-        
         self.leader.step(self.dt)
 
         # 1. Update UAV Physics
@@ -253,8 +271,41 @@ class RLNoLeader(ParallelEnv):
 
         # 2. Pre-calculate group metrics for rewards
         all_pos = np.array([u.position for u in self.followers.values()] + [self.leader.position])
-        centroid = np.mean(all_pos) #
+        all_orient = np.array([u.orientation for u in self.followers.values()] + [self.leader.orientation])
+        N = len(all_pos)
         
+        # ----------------------------------------------------
+        # Swarm Metrics Computation
+        # ----------------------------------------------------
+        # 1. Polar Order Parameter (Psi)
+        unit_vecs = np.column_stack((np.cos(all_orient), np.sin(all_orient)))
+        psi = np.linalg.norm(np.sum(unit_vecs, axis=0)) / N
+        self.psi_values.append(psi)
+
+        # 2. Radius of Gyration (Rg)
+        centroid = np.mean(all_pos, axis=0)
+        rg = np.sqrt(np.mean(np.sum((all_pos - centroid) ** 2, axis=1)))
+        self.rg_values.append(rg)
+
+        # Pairwise Distances (for MNND and Laplacian)
+        diffs = all_pos[:, np.newaxis, :] - all_pos[np.newaxis, :, :]
+        dist_matrix = np.linalg.norm(diffs, axis=-1)
+
+        # 3. Mean Nearest-Neighbor Distance (MNND)
+        dist_matrix_no_diag = dist_matrix.copy()
+        np.fill_diagonal(dist_matrix_no_diag, np.inf)
+        mnnd = np.mean(np.min(dist_matrix_no_diag, axis=1))
+        self.mnnd_values.append(mnnd)
+
+        # 4. Algebraic Connectivity (Lambda 2)
+        adj_matrix = (dist_matrix_no_diag <= self.d3).astype(float)
+        deg_matrix = np.diag(np.sum(adj_matrix, axis=1))
+        laplacian = deg_matrix - adj_matrix
+        eigvals = np.sort(np.linalg.eigvalsh(laplacian))
+        lambda2 = max(0.0, float(eigvals[1])) if N > 1 else 0.0
+        self.lambda2_values.append(lambda2)
+        # ----------------------------------------------------
+
         observations, rewards, terminations, truncations, infos = {}, {}, {}, {}, {}
 
         for agent_id, uav in self.followers.items():
@@ -300,7 +351,7 @@ class RLNoLeader(ParallelEnv):
             # Range: [-1.0 (opposite) to +1.0 (perfectly aligned)]
             cos_sim = np.cos(uav.orientation - self.leader.orientation)
             if cos_sim >= 0:
-               r_Hdg = self.w_Hdg_align
+                r_Hdg = self.w_Hdg_align
             else:
                 r_Hdg = cos_sim * self.w_Hdg_align
 
@@ -321,7 +372,7 @@ class RLNoLeader(ParallelEnv):
             # Boundary & Step Logic
             out_of_bounds = np.any(uav.position < 0) or np.any(uav.position > self.GRID_SIZE)
             terminations[agent_id] = out_of_bounds
-            if (out_of_bounds):
+            if out_of_bounds:
                 rewards[agent_id] += self.w_CwB
             truncations[agent_id] = self.current_step >= self.max_steps
             observations[agent_id] = self._get_obs(agent_id)
@@ -346,9 +397,6 @@ class RLNoLeader(ParallelEnv):
             step_heading_diffs.append(h_diff)
             self.heading_deviations.append(h_diff)
 
-        step_avg_heading = np.mean(step_heading_diffs) if step_heading_diffs else 0.0
-        cum_avg_heading = np.mean(self.heading_deviations) if self.heading_deviations else 0.0
-        
         if any(terminations.values()):
             for agent_id in self.followers:
                 terminations[agent_id] = True
@@ -356,23 +404,12 @@ class RLNoLeader(ParallelEnv):
         if self.render_mode == "human":
             self._render_frame()
 
-        # # Live metric logging directly from the step method
-        # print(
-        #     f"Step {self.step_counter:4d} | "
-        #     f"Proximity Adv: {self.proximity_advances:5d} | "
-        #     f"Ideal Range: {self.ideal_range_tracking:5d} | "
-        #     f"Near Collisions: {self.near_collision_events:4d} | "
-        #     f"Step Hdg Dev: {step_avg_heading:5.1f}° | "
-        #     f"Cum Hdg Dev: {cum_avg_heading:5.1f}°"
-        # )
-
-        # Log metrics to CSV if all agents terminate/truncate
         all_done = all(terminations.values()) or all(truncations.values())
         if all_done:
             self._log_run_to_csv()
 
         return observations, rewards, terminations, truncations, infos
-    
+
     def render(self):
         if self.render_mode == "rgb_array":
             return self._render_frame()
@@ -422,7 +459,6 @@ class RLNoLeader(ParallelEnv):
         else:
             return np.transpose(np.array(pygame.surfarray.pixels3d(canvas)), axes=(1, 0, 2))
 
-
     def make_arrow(self, uav, arrow_length, head_length, head_angle):
         # Scale UAV coordinates by RENDER_MULTIPLIER
         cx = float(uav.position[0]) * RENDER_MULTIPLIER
@@ -449,7 +485,6 @@ class RLNoLeader(ParallelEnv):
         )
         
         return start_point, end_point, w1, w2
-        
 
     def close(self):
         if self.step_counter > 0:
